@@ -11,7 +11,7 @@ same keys, same views, same version you already have installed.
 
 ```
 k9mux                                         # $KUBECONFIG, or ~/.kube/config
-k9mux --kubeconfig ~/.kube/config-prod      # a specific file
+k9mux --kubeconfig ~/.kube/config-prod        # a specific file
 KUBECONFIG=~/.kube/a:~/.kube/b k9mux          # several, merged
 ```
 
