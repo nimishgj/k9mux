@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mk9s — split k9s panes</title>
+<style>
+:root{
+  --bg:#000; --rail:#0a0c10; --line:#1c2230;
+  --fg:#d0d0d0; --dim:#6b7280;
+  --key:#5fafff; --aqua:#2ad4d4; --orange:#ff8c42; --white:#fff;
+  --green:#5fd75f; --yellow:#ffd75f; --red:#ff5f5f;
+  --cursor:#0d5c63; --idle:#243040;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg)}
+body{color:var(--fg);font:13px/1.5 ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden}
+#app{display:flex;height:100vh}
+
+/* ── sidebar ── */
+#rail{width:230px;min-width:230px;background:var(--rail);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;overflow:hidden}
+#rail h1{margin:0;padding:7px 12px;font-size:13px;font-weight:700;color:var(--orange);
+  border-bottom:1px solid var(--line);letter-spacing:.5px}
+#rail h1 span{color:var(--dim);font-weight:400;float:right}
+#tree{flex:1;overflow-y:auto;padding:6px 0}
+.grp{padding:5px 12px 2px;color:var(--dim);font-size:11px;letter-spacing:.8px;text-transform:uppercase}
+.inst{display:flex;align-items:center;gap:8px;padding:2px 12px 2px 18px;cursor:pointer;white-space:nowrap}
+.inst:hover{background:#121722}
+.inst.open{background:#0e1a1c}
+.inst.focus{background:var(--cursor);color:#fff}
+.inst .nm{flex:1;overflow:hidden;text-overflow:ellipsis}
+.inst .n{color:var(--dim);font-size:11px}
+.inst.focus .n{color:#bfe9ec}
+.inst.dead .nm{color:var(--dim)}
+.pn{font-size:10px;padding:0 4px;border:1px solid var(--aqua);color:var(--aqua);border-radius:2px}
+.inst.focus .pn{border-color:#fff;color:#fff}
+.dot{font-size:10px}
+.ok{color:var(--green)} .warn{color:var(--yellow)} .bad{color:var(--red)} .off{color:var(--dim)}
+#railfoot{border-top:1px solid var(--line);padding:6px 12px;color:var(--dim);font-size:11px;line-height:1.8}
+#railfoot b{color:var(--key);font-weight:400;display:inline-block;min-width:52px}
+
+/* ── panes ── */
+#panes{flex:1;min-width:0;display:grid;gap:5px;padding:4px 6px}
+.pane{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;
+  border:1px solid var(--idle);padding:2px 5px}
+.pane.on{border-color:var(--aqua)}
+.pane.on .kbox{border-color:var(--aqua)}
+.ptag{position:absolute;top:-0.78em;right:10px;background:var(--bg);padding:0 6px;color:var(--idle);z-index:2}
+.pane.on .ptag{color:var(--aqua)}
+
+.khead{display:flex;gap:24px;padding:2px 4px 6px;white-space:nowrap;overflow:hidden}
+.kcol{display:grid;grid-template-columns:auto auto;gap:0 10px;align-content:start}
+.kcol .l{color:var(--key)} .kcol .v{color:var(--white)}
+.klogo{margin-left:auto;color:var(--orange);white-space:pre;line-height:1.15;font-size:12px}
+.khead1{padding:2px 4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.khead1 .l{color:var(--key)} .khead1 .v{color:var(--white)} .khead1 .s{color:var(--dim)}
+.kbox{flex:1;min-height:0;border:1px solid var(--idle);position:relative;display:flex;flex-direction:column}
+.ktitle{position:absolute;top:-0.78em;left:12px;background:var(--bg);padding:0 6px;color:var(--aqua);line-height:1;z-index:2}
+.ktitle b{color:var(--orange);font-weight:400}
+.kscroll{flex:1;overflow:auto}
+table{border-collapse:collapse;width:100%;white-space:nowrap}
+th{position:sticky;top:0;background:var(--bg);color:var(--aqua);text-align:left;font-weight:400;
+  padding:2px 8px;text-transform:uppercase;letter-spacing:.4px}
+td{padding:0 8px}
+tr.r{cursor:pointer}
+tr.r:hover td{background:#111}
+tr.r.cur td{background:var(--idle)}
+.pane.on tr.r.cur td{background:var(--cursor);color:#fff}
+.pane.on tr.r.cur td *{color:#fff !important}
+.s-run{color:var(--green)} .s-crash{color:var(--red)} .s-pend{color:var(--yellow)}
+.prompt{padding:1px 10px;color:var(--orange);border-bottom:1px solid var(--line)}
+.prompt input{background:transparent;border:none;outline:none;color:var(--white);font:inherit;width:80%}
+.crumb{padding:2px 4px}
+.crumb span{background:var(--idle);color:#9fb3c8;padding:0 8px}
+.pane.on .crumb span{background:var(--cursor);color:#fff}
+.txt{padding:6px 10px;white-space:pre-wrap;color:var(--fg);margin:0;font:inherit}
+.err-box{margin:auto;border:1px solid var(--red);padding:12px 20px;color:var(--red);text-align:center;background:#140708}
+.err-box b{color:var(--white);display:block;margin-bottom:6px;font-weight:400}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:#1c2230}
+::-webkit-scrollbar-track{background:var(--bg)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="rail">
+    <h1>mk9s <span id="railcount"></span></h1>
+    <div id="tree"></div>
+    <div id="railfoot">
+      <div><b>|</b> split vertical</div>
+      <div><b>-</b> split horizontal</div>
+      <div><b>tab</b> focus next pane</div>
+      <div><b>X</b> close pane</div>
+      <div><b>click</b> attach to focused</div>
+    </div>
+  </div>
+  <div id="panes"></div>
+</div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const el = (t,c,h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
+const esc = s => String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+/* ── fleet: clusters, each with n instances ── */
+const INSTANCES = [
+  {n:'use1-a', g:'prod-us', ctx:'arn:aws:eks:us-east-1:4102:cluster/use1-a',    v:'v1.31.4', st:'ok'},
+  {n:'use1-b', g:'prod-us', ctx:'arn:aws:eks:us-east-1:4102:cluster/use1-b',    v:'v1.31.4', st:'ok'},
+  {n:'usw2-a', g:'prod-us', ctx:'arn:aws:eks:us-west-2:4102:cluster/usw2-a',    v:'v1.31.4', st:'ok'},
+  {n:'usw2-b', g:'prod-us', ctx:'arn:aws:eks:us-west-2:4102:cluster/usw2-b',    v:'v1.31.2', st:'bad'},
+  {n:'euc1-a', g:'prod-eu', ctx:'arn:aws:eks:eu-central-1:4102:cluster/euc1-a', v:'v1.30.9', st:'ok'},
+  {n:'euc1-b', g:'prod-eu', ctx:'arn:aws:eks:eu-central-1:4102:cluster/euc1-b', v:'v1.30.9', st:'warn'},
+  {n:'euw2-a', g:'prod-eu', ctx:'arn:aws:eks:eu-west-2:4102:cluster/euw2-a',    v:'v1.30.9', st:'ok'},
+  {n:'euw2-b', g:'prod-eu', ctx:'arn:aws:eks:eu-west-2:4102:cluster/euw2-b',    v:'—',       st:'off'},
+  {n:'stg-blue',  g:'staging', ctx:'kind-stg-blue',  v:'v1.32.0', st:'ok'},
+  {n:'stg-green', g:'staging', ctx:'kind-stg-green', v:'v1.32.0', st:'ok'},
+];
+const GROUPS = [...new Set(INSTANCES.map(i=>i.g))];
+const byName = n => INSTANCES.find(i=>i.n===n);
+
+let seed = 20260915;
+const rnd  = () => (seed = (seed*1664525+1013904223)>>>0) / 4294967296;
+const pick = a => a[Math.floor(rnd()*a.length)];
+const az   = n => Array.from({length:n},()=> "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(rnd()*36)]).join('');
+const ri   = (a,b) => Math.round(a + rnd()*(b-a));
+
+const APPS = [
+  {ns:'payments', app:'checkout',       n:4, cpu:[120,160], mem:[280,340], c:2},
+  {ns:'identity', app:'session-api',    n:3, cpu:[35,50],   mem:[100,130], c:1},
+  {ns:'ledger',   app:'ledger-worker',  n:2, cpu:[80,100],  mem:[390,450], c:1},
+  {ns:'infra',    app:'otel-collector', n:2, cpu:[25,40],   mem:[140,190], c:1},
+];
+const NAMESPACES = ['all', ...APPS.map(a=>a.ns)];
+
+for (const i of INSTANCES){
+  i.pods=[]; i.deploys=[]; i.nodes=[];
+  if (i.st==='off'){ i.cpu=null; i.mem=null; continue; }
+  i.cpu = i.n==='euc1-b'?88:ri(20,65);
+  i.mem = i.n==='euc1-b'?91:ri(30,72);
+  for (const a of APPS){
+    const rs = az(6), cnt = Math.max(1, a.n + (INSTANCES.indexOf(i)%3) - 1);
+    let ready = 0;
+    for (let k=0;k<cnt;k++){
+      let status='Running', rd=`${a.c}/${a.c}`, restarts = rnd()<0.08?ri(1,3):0;
+      if (i.n==='usw2-b' && a.app==='checkout' && k===0){ status='CrashLoopBackOff'; rd=`${a.c-1}/${a.c}`; restarts=7; }
+      else if (i.n==='euw2-a' && a.app==='checkout' && k===0){ status='Pending'; rd=`0/${a.c}`; restarts=0; }
+      else ready++;
+      i.pods.push({ns:a.ns, app:a.app, name:`${a.app}-${rs}-${az(5)}`, ready:rd, status, restarts,
+        cpu:status==='Pending'?0:ri(a.cpu[0],a.cpu[1]), mem:status==='Pending'?0:ri(a.mem[0],a.mem[1]),
+        ip:`10.${ri(0,60)}.${ri(0,250)}.${ri(0,250)}`, node:`ip-10-${ri(1,60)}-${ri(0,250)}-${ri(0,250)}`, pf:rnd()<0.08,
+        age:status==='Pending'?'38s':status==='CrashLoopBackOff'?'11m':pick(['4d','2d','16d','9d','3d','7h','21h']),
+        img:(i.n==='usw2-b'&&a.app==='checkout')?'v2.13.0':'v2.14.1'});
+    }
+    i.deploys.push({ns:a.ns, name:a.app, ready:`${ready}/${cnt}`, up:cnt, avail:ready, age:pick(['4d2h','2d6h','16d','9d4h'])});
+  }
+  for (let k=0;k<ri(3,6);k++)
+    i.nodes.push({name:`ip-10-${20+k}-${ri(0,250)}-${ri(0,250)}`, role:k===0?'control-plane':'<none>',
+      status:(i.n==='euc1-b'&&k<2)?'MemoryPressure':'Ready', ver:i.v, cpu:ri(15,80), mem:ri(25,85),
+      pods:ri(8,40), age:pick(['31d','88d','12d','5d'])});
+}
+
+/* ── panes: each is an independent k9s session ── */
+let uid = 0;
+const newPane = inst => ({id:++uid, inst, res:'pods', ns:'all', cur:0, filter:'', mode:'table', buf:null});
+let panes  = [newPane('use1-a')];
+let focus  = 0;
+let layout = 'v';           // 'v' = side by side, 'h' = stacked
+let prompt = null;          // ':' | '/'
+const MAX = 4;
+
+function split(dir){
+  if (panes.length>=MAX) return;
+  layout = dir;
+  const src = panes[focus];
+  const next = INSTANCES.find(i => !panes.some(p=>p.inst===i.n)) || byName(src.inst);
+  panes.splice(focus+1, 0, {...newPane(next.n), res:src.res, ns:src.ns});
+  focus++; prompt=null; render();
+}
+function closePane(){
+  if (panes.length===1) return;
+  panes.splice(focus,1);
+  focus = Math.min(focus, panes.length-1); prompt=null; render();
+}
+
+/* ── sidebar ── */
+const DOT = {ok:'●',warn:'◐',bad:'✗',off:'○'};
+const CLS = {ok:'ok',warn:'warn',bad:'bad',off:'off'};
+function renderRail(){
+  const up = INSTANCES.filter(i=>i.st!=='off').length;
+  $('#railcount').textContent = `${up}/${INSTANCES.length}`;
+  const t = $('#tree'); t.innerHTML='';
+  for (const g of GROUPS){
+    t.append(el('div','grp',g));
+    for (const i of INSTANCES.filter(x=>x.g===g)){
+      const at = panes.findIndex(p=>p.inst===i.n);
+      const cls = `inst ${i.st==='off'?'dead':''} ${at>=0?(at===focus?'focus':'open'):''}`;
+      const r = el('div',cls,
+        `<span class="dot ${CLS[i.st]}">${DOT[i.st]}</span><span class="nm">${i.n}</span>`+
+        (at>=0?`<span class="pn">${at+1}</span>`:'')+
+        `<span class="n">${i.st==='off'?'—':i.pods.length}</span>`);
+      r.title = `${i.ctx}\n${i.v}\nclick → attach to pane ${focus+1}`;
+      r.onclick = () => { panes[focus].inst=i.n; panes[focus].cur=0; panes[focus].mode='table'; prompt=null; render(); };
+      t.append(r);
+    }
+  }
+}
+
+/* ── k9s pane ── */
+const LOGO = [
+' ____  __.________',
+'|    |/ _/   __   \\______',
+'|      < \\____    /  ___/',
+'|    |  \\   /    /\\___ \\',
+'|____|__ \\ /____//____  >',
+'        \\/            \\/',
+].join('\n');
+
+const KEYS = [['&lt;a&gt;','Attach'],['&lt;ctrl-d&gt;','Delete'],['&lt;d&gt;','Describe'],['&lt;e&gt;','Edit'],
+  ['&lt;?&gt;','Help'],['&lt;l&gt;','Logs'],['&lt;p&gt;','Logs Previous'],['&lt;s&gt;','Shell'],['&lt;y&gt;','YAML']];
+
+const COLS = {
+  pods:[
+    {h:'namespace',f:p=>p.ns,w:1},{h:'name',f:p=>esc(p.name),w:1},{h:'pf',f:p=>p.pf?'●':'○',w:3},
+    {h:'ready',f:p=>p.ready,w:1},
+    {h:'status',f:p=>`<span class="${p.status==='Running'?'s-run':p.status==='Pending'?'s-pend':'s-crash'}">${p.status}</span>`,w:1},
+    {h:'restarts',f:p=>p.restarts,w:2},{h:'cpu',f:p=>p.cpu,w:2},{h:'mem',f:p=>p.mem,w:2},
+    {h:'%cpu/r',f:p=>Math.round(p.cpu/2.5),w:3},{h:'%mem/r',f:p=>Math.round(p.mem/5.12),w:3},
+    {h:'ip',f:p=>p.ip,w:3},{h:'node',f:p=>p.node,w:3},{h:'age',f:p=>p.age,w:1},
+  ],
+  deploys:[
+    {h:'namespace',f:d=>d.ns,w:1},{h:'name',f:d=>d.name,w:1},
+    {h:'ready',f:d=>`<span class="${d.avail===d.up?'s-run':'s-crash'}">${d.ready}</span>`,w:1},
+    {h:'up-to-date',f:d=>d.up,w:2},{h:'available',f:d=>d.avail,w:2},{h:'age',f:d=>d.age,w:1},
+  ],
+  nodes:[
+    {h:'name',f:n=>n.name,w:1},
+    {h:'status',f:n=>`<span class="${n.status==='Ready'?'s-run':'s-pend'}">${n.status}</span>`,w:1},
+    {h:'role',f:n=>n.role,w:2},{h:'version',f:n=>n.ver,w:2},
+    {h:'%cpu',f:n=>n.cpu,w:3},{h:'%mem',f:n=>n.mem,w:3},{h:'pods',f:n=>n.pods,w:3},{h:'age',f:n=>n.age,w:1},
+  ],
+};
+const TITLE = {pods:'Pods', deploys:'Deployments', nodes:'Nodes'};
+const ALIAS = {po:'pods',pod:'pods',pods:'pods',dp:'deploys',deploy:'deploys',deployments:'deploys',
+               no:'nodes',node:'nodes',nodes:'nodes'};
+
+function rowsFor(p){
+  const i = byName(p.inst);
+  let rows = i[p.res] || [];
+  if (p.res!=='nodes' && p.ns!=='all') rows = rows.filter(r=>r.ns===p.ns);
+  if (p.filter){ const f=p.filter.toLowerCase(); rows = rows.filter(r=>JSON.stringify(r).toLowerCase().includes(f)); }
+  return rows;
+}
+
+/* grid geometry -> how much k9s chrome fits */
+function geometry(){
+  const n = panes.length;
+  if (n===4) return {cols:2, rows:2, wf:.5, hf:.5};
+  return layout==='v' ? {cols:n, rows:1, wf:1/n, hf:1} : {cols:1, rows:n, wf:1, hf:1/n};
+}
+function renderPane(p, idx, g){
+  const i = byName(p.inst), on = idx===focus;
+  const pane = el('div','pane'+(on?' on':''));
+  pane.onmousedown = () => { if(focus!==idx){ focus=idx; prompt=null; render(); } };
+
+  const wide = g.wf >= .6, tall = g.hf >= .6;
+  if (tall){
+    const head = el('div','khead');
+    head.append(el('div','kcol',[['Context:',i.n],['Cluster:',i.g],['User:','eks-admin'],['K9s Rev:','v0.32.5'],
+      ['K8s Rev:',i.v],['CPU:',i.cpu==null?'n/a':i.cpu+'%'],['MEM:',i.mem==null?'n/a':i.mem+'%']]
+      .map(([l,v])=>`<span class="l">${l}</span><span class="v">${v}</span>`).join('')));
+    head.append(el('div','kcol', NAMESPACES.map((n,x)=>
+      `<span class="l">&lt;${x}&gt;</span><span class="v" style="${n===p.ns?'color:var(--orange)':''}">${n}</span>`).join('')));
+    if (wide){
+      head.append(el('div','kcol', KEYS.map(([a,b])=>`<span class="l">${a}</span><span class="v">${b}</span>`).join('')));
+      head.append(el('div','klogo',LOGO));
+    }
+    pane.append(head);
+  } else {
+    pane.append(el('div','khead1',
+      `<span class="l">Context:</span> <span class="v">${i.n}</span> <span class="s">·</span> ${i.g}` +
+      ` <span class="s">·</span> ${i.v} <span class="s">·</span> cpu ${i.cpu==null?'n/a':i.cpu+'%'}` +
+      ` <span class="s">·</span> mem ${i.mem==null?'n/a':i.mem+'%'}` +
+      ` <span class="s">·</span> ns <span class="v">${p.ns}</span>`));
+  }
+
+  const box = el('div','kbox');
+  box.append(el('div','ptag',`${idx+1}`));
+  if (i.st==='off'){
+    box.append(el('div','err-box',
+      `<b>Unable to connect to context "${i.n}"</b>Get "https://${i.n}.eks.amazonaws.com/version":<br>dial tcp 10.42.7.9:443: i/o timeout`));
+    pane.append(box); pane.append(el('div','crumb',`<span>&lt;${p.res}&gt;</span>`)); return pane;
+  }
+
+  const rows = rowsFor(p);
+  p.cur = Math.max(0, Math.min(p.cur, rows.length-1));
+
+  if (p.mode==='table'){
+    box.append(el('div','ktitle',
+      `<b>${TITLE[p.res]}</b>(${p.res==='nodes'?'all':p.ns})[${rows.length}]${p.filter?` &lt;/${esc(p.filter)}&gt;`:''}`));
+    if (on && prompt) box.append(el('div','prompt',`${prompt}<input id="pi" spellcheck="false" autocomplete="off">`));
+    const cols = COLS[p.res].filter(c => c.w <= (g.wf>=.9?3:g.wf>=.6?2:1));
+    const sc = el('div','kscroll'), t = el('table'), tr = el('tr');
+    cols.forEach(c=>tr.append(el('th',null,c.h)));
+    t.append(el('thead',null).appendChild(tr).parentNode);
+    const tb = el('tbody');
+    rows.forEach((r,x)=>{
+      const q = el('tr','r'+(x===p.cur?' cur':''));
+      cols.forEach(c=>q.append(el('td',null,c.f(r))));
+      q.onmousedown = e => { focus=idx; p.cur=x; prompt=null; render(); e.stopPropagation(); };
+      tb.append(q);
+    });
+    t.append(tb); sc.append(t); box.append(sc);
+  } else {
+    box.append(el('div','ktitle',`<b>${p.mode==='logs'?'Logs':'Describe'}</b>(${p.buf.title})`));
+    box.append(el('pre','txt kscroll',p.buf.body));
+  }
+  pane.append(box);
+  pane.append(el('div','crumb',`<span>&lt;${p.res}&gt;</span>`));
+  return pane;
+}
+function render(){
+  renderRail();
+  const g = geometry(), c = $('#panes');
+  c.style.gridTemplateColumns = `repeat(${g.cols},minmax(0,1fr))`;
+  c.style.gridTemplateRows    = `repeat(${g.rows},minmax(0,1fr))`;
+  c.innerHTML='';
+  panes.forEach((p,x)=> c.append(renderPane(p,x,g)));
+  if (prompt){ const pi=$('#pi'); if(pi){ pi.focus(); pi.onkeydown=onPrompt; } }
+}
+
+function onPrompt(e){
+  const p = panes[focus], v = e.target.value.trim();
+  if (e.key==='Enter'){
+    if (prompt===':'){ const r = ALIAS[v.toLowerCase()]; if (r){ p.res=r; p.cur=0; p.filter=''; } }
+    else p.filter = v;
+    prompt=null; render();
+  } else if (e.key==='Escape'){ prompt=null; render(); }
+  e.stopPropagation();
+}
+function describe(){
+  const p = panes[focus], i = byName(p.inst), r = rowsFor(p)[p.cur]; if(!r) return;
+  p.mode='describe'; p.buf={title:r.name, body:
+`Name:             ${r.name}
+Namespace:        ${r.ns||'—'}
+Context:          ${i.ctx}
+Node:             ${r.node||r.name}
+Status:           ${r.status||'Ready'}
+IP:               ${r.ip||'—'}
+Containers:
+  ${r.app||r.name}:
+    Image:        registry.internal/${r.app||r.name}:${r.img||'—'}
+    Restart Count: ${r.restarts??0}
+    Requests:     cpu 250m, memory 256Mi
+    Limits:       cpu 1, memory 512Mi
+${r.status==='CrashLoopBackOff'?`
+Events:
+  Warning  BackOff  11m (x7)  kubelet  Back-off restarting failed container
+  Warning  Failed   11m       kubelet  config checksum 7c02 mismatch, expected a91f`:''}`};
+  render();
+}
+function logs(){
+  const p = panes[focus], r = rowsFor(p)[p.cur];
+  if (!r || p.res!=='pods') return;
+  const now = Date.now();
+  p.mode='logs'; p.buf={title:r.name, body:Array.from({length:26},(_,x)=>{
+    const t = new Date(now-(26-x)*1300).toISOString().replace('T',' ').slice(0,23);
+    if (r.status==='CrashLoopBackOff')
+      return `${t}  ${x%3?'ERROR failed to load cfg: checksum 7c02 mismatch':'FATAL exit status 1 — restarting'}`;
+    return `${t}  INFO  ${pick([`order ${ri(8000,8900)} authorized in ${ri(30,99)}ms`,
+      `GET /v1/cart/${az(8)} 200 ${ri(4,44)}ms`,`reconciled ${r.app} generation ${ri(40,49)}`])}`;
+  }).join('\n')};
+  render();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName==='INPUT') return;
+  const p = panes[focus], i = byName(p.inst);
+
+  if (e.key==='|'){ split('v'); e.preventDefault(); return; }
+  if (e.key==='-'){ split('h'); e.preventDefault(); return; }
+  if (e.key==='X'){ closePane(); return; }
+  if (e.key==='Tab'){ focus=(focus+1)%panes.length; prompt=null; render(); e.preventDefault(); return; }
+  if (e.ctrlKey && 'hjkl'.includes(e.key)){
+    if (e.key==='h'||e.key==='l'){ focus=(focus+(e.key==='l'?1:panes.length-1))%panes.length; prompt=null; render(); }
+    else { const x = INSTANCES.findIndex(v=>v.n===p.inst) + (e.key==='j'?1:-1);
+      p.inst = INSTANCES[(x+INSTANCES.length)%INSTANCES.length].n; p.cur=0; p.mode='table'; render(); }
+    e.preventDefault(); return;
+  }
+  if (i.st==='off') return;
+  if (p.mode!=='table'){ if(e.key==='Escape'){ p.mode='table'; render(); } return; }
+
+  const rows = rowsFor(p);
+  switch(e.key){
+    case 'j': case 'ArrowDown': p.cur=Math.min(p.cur+1,rows.length-1); render(); e.preventDefault(); break;
+    case 'k': case 'ArrowUp':   p.cur=Math.max(p.cur-1,0); render(); e.preventDefault(); break;
+    case ':': prompt=':'; render(); e.preventDefault(); break;
+    case '/': prompt='/'; render(); e.preventDefault(); break;
+    case 'd': describe(); break;
+    case 'l': logs(); break;
+    case 'Escape': if(p.filter){ p.filter=''; render(); } break;
+    default:
+      if (/^[0-9]$/.test(e.key) && +e.key < NAMESPACES.length){ p.ns=NAMESPACES[+e.key]; p.cur=0; render(); }
+  }
+});
+
+render();
+</script>
+</body>
+</html>

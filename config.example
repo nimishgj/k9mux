@@ -1,0 +1,56 @@
+# k9mux config — copy to ~/.config/k9mux/config
+#
+# Every key not bound here goes straight to the k9s in the focused pane.
+# These are the defaults; you only need the lines you want to change.
+
+set prefix M-space
+
+bind c   new-window
+bind ,   rename-window
+bind n   next-window
+bind p   prev-window
+bind 1   select-window-0
+bind 2   select-window-1
+bind 3   select-window-2
+bind 4   select-window-3
+
+bind '"' split-horizontal
+bind %   split-vertical
+bind x   close-pane
+bind Tab focus-next
+bind '<' prev-cluster
+bind '>' next-cluster
+bind r   restart
+bind e   toggle-sidebar
+bind ?   help
+bind q   quit
+
+bind -n M-h focus-left
+bind -n M-j focus-down
+bind -n M-k focus-up
+bind -n M-l focus-right
+
+bind -n M-h focus-left
+bind -n M-j focus-down
+bind -n M-k focus-up
+bind -n M-l focus-right
+
+# Hand a key back to k9s
+# unbind x
+
+# Keys:      a single character, or C-x / M-x, or a name such as
+#            Space Tab Enter Escape BSpace Up Down Left Right F1..F12
+# Commands:  new-window rename-window next-window prev-window
+#            select-window-0 .. select-window-9
+#            split-vertical split-horizontal close-pane
+#            focus-left focus-right focus-up focus-down focus-next
+#            next-cluster prev-cluster restart help quit
+
+# Which kubeconfigs to read when $KUBECONFIG is not set
+# kubeconfig ~/.kube/config-prod
+# kubeconfig ~/.kube/config-remote
+
+# Group contexts into clusters. Without these, each kubeconfig file
+# becomes one cluster named after the file.
+# cluster prod-us use1-a use1-b
+# cluster prod-eu euc1-a

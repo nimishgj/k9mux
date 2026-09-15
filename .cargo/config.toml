@@ -1,0 +1,4 @@
+# Every test spawns real child processes on real ptys, and the pty pool is
+# finite. Cap the harness so a parallel run cannot exhaust it.
+[env]
+RUST_TEST_THREADS = "4"
