@@ -35,7 +35,7 @@ prefix, `option-space` by default. Moving between panes needs no prefix.
 | `⌥space` `c` | new window |
 | `⌥space` `,` | rename the window |
 | `⌥space` `n` `p` | next / previous window |
-| `⌥space` `%` `"` | split into side-by-side / stacked panes |
+| `⌥space` `%` `"` | split the focused pane, side-by-side / stacked |
 | `⌥space` `x` | close the pane |
 | `⌥space` `<` `>` | previous / next cluster in the focused pane |
 | `⌥space` `e` | collapse the sidebar |
@@ -101,6 +101,5 @@ and macOS, since the pty layer is the part most likely to differ.
 ## Not done yet
 
 - No session persistence: closing k9mux kills its k9s processes.
-- Panes can't be resized by hand, only split evenly.
-- Up to four panes per window.
+- Panes can't be resized by hand; splits are always even.
 - No scrollback beyond what k9s itself draws.

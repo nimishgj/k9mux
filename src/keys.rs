@@ -1,13 +1,5 @@
-use crate::layout::Split;
+use crate::layout::{Dir, Split};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Dir {
-    Left,
-    Right,
-    Up,
-    Down,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {

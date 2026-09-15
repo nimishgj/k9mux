@@ -96,8 +96,8 @@ sends `alt`+`h` or `˙`.
 
 | command | |
 |---|---|
-| `split-vertical` | side-by-side panes |
-| `split-horizontal` | stacked panes |
+| `split-vertical` | split the focused pane side by side |
+| `split-horizontal` | split the focused pane top and bottom |
 | `close-pane` | close the focused pane |
 | `focus-left` `focus-right` `focus-up` `focus-down` | move focus geometrically |
 | `focus-next` | cycle to the next pane |

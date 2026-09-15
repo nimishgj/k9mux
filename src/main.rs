@@ -160,6 +160,7 @@ fn event_loop<B: ratatui::backend::Backend>(
         // Panes are sized from the frame, then the children are told to match.
         let size = term.size().map_err(|e| e.to_string())?;
         let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+        app.set_area(ui::pane_body(app, area));
         let sizes = ui::pane_inner_sizes(app, area);
         app.resize_panes(&sizes);
 

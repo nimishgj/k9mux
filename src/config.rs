@@ -148,7 +148,8 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::keys::{Action, Dir, Outcome};
+    use crate::keys::{Action, Outcome};
+    use crate::layout::Dir;
     use crate::layout::Split;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 

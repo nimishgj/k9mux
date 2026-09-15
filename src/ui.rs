@@ -1,6 +1,5 @@
 use crate::app::{App, Mode, Pane};
 use crate::fleet::Health;
-use crate::layout;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -57,14 +56,18 @@ fn hints(app: &App) -> Vec<(String, &'static str)> {
 
 /// Where each pane of the current window is drawn.
 pub fn pane_areas(app: &App, area: Rect) -> Vec<Rect> {
+    app.pane_rects(pane_body(app, area))
+}
+
+/// The region the panes share, i.e. everything the sidebar is not using.
+pub fn pane_body(app: &App, area: Rect) -> Rect {
     let rail = sidebar_width(app);
-    let body = Rect::new(
+    Rect::new(
         rail.min(area.width),
         area.y,
         area.width.saturating_sub(rail),
         area.height,
-    );
-    layout::areas(body, app.panes().len(), app.split())
+    )
 }
 
 /// Rows and columns available to each child, i.e. inside the borders.

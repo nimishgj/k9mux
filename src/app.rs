@@ -1,10 +1,12 @@
 use crate::fleet::{Fleet, Health};
 use crate::keymap::Keymap;
-use crate::keys::{Action, Dir};
-use crate::layout::Split;
+use crate::keys::Action;
+use crate::layout::{Dir, Node, PaneId, Split};
 use crate::session::{Launch, Session};
 
-pub const MAX_PANES: usize = 4;
+/// A pane narrower or shorter than this is not worth creating, so a split
+/// that would produce one is refused - the same rule tmux applies.
+pub const MIN_PANE: (u16, u16) = (4, 10);
 /// What a window is called until it is renamed.
 pub const DEFAULT_WINDOW_NAME: &str = "k9mux";
 
@@ -24,6 +26,7 @@ pub fn k9s_launch(kubeconfig: &str) -> Spawner {
 }
 
 pub struct Pane {
+    pub id: PaneId,
     pub instance: String,
     pub session: Option<Session>,
     /// Set when the session could not be started at all.
@@ -45,8 +48,35 @@ impl Pane {
 pub struct Window {
     pub name: String,
     pub panes: Vec<Pane>,
-    pub focus: usize,
-    pub split: Split,
+    /// Which pane is focused, by id.
+    pub focus: PaneId,
+    /// How the panes are carved up.
+    pub layout: Node,
+    next_id: PaneId,
+}
+
+impl Window {
+    fn new(name: String, instance: String) -> Window {
+        Window {
+            name,
+            panes: vec![Pane {
+                id: 1,
+                instance,
+                session: None,
+                error: None,
+            }],
+            focus: 1,
+            layout: Node::leaf(1),
+            next_id: 2,
+        }
+    }
+    pub fn index_of(&self, id: PaneId) -> Option<usize> {
+        self.panes.iter().position(|p| p.id == id)
+    }
+    /// Panes and their rects, in layout order.
+    pub fn rects(&self, area: ratatui::layout::Rect) -> Vec<(PaneId, ratatui::layout::Rect)> {
+        self.layout.rects(area)
+    }
 }
 
 /// Typing a window name takes over the keyboard until it is finished.
@@ -70,6 +100,8 @@ pub struct App {
     spawn: Spawner,
     /// Size last used for a pane, so new panes start out sensible.
     pane_size: (u16, u16),
+    /// The area the panes were last laid out in, for geometry decisions.
+    last_area: ratatui::layout::Rect,
 }
 
 impl App {
@@ -85,16 +117,7 @@ impl App {
             .unwrap_or_default();
         let mut app = App {
             fleet,
-            windows: vec![Window {
-                name: DEFAULT_WINDOW_NAME.to_string(),
-                panes: vec![Pane {
-                    instance: first,
-                    session: None,
-                    error: None,
-                }],
-                focus: 0,
-                split: Split::Vertical,
-            }],
+            windows: vec![Window::new(DEFAULT_WINDOW_NAME.to_string(), first)],
             current: 0,
             keymap,
             armed: false,
@@ -104,6 +127,7 @@ impl App {
             should_quit: false,
             spawn,
             pane_size: (24, 80),
+            last_area: ratatui::layout::Rect::new(0, 0, 80, 24),
         };
         app.start(0, 0);
         app
@@ -119,21 +143,36 @@ impl App {
     pub fn panes(&self) -> &[Pane] {
         &self.window().panes
     }
+    /// Index of the focused pane within `panes()`.
     pub fn focus(&self) -> usize {
-        self.window().focus
+        let w = self.window();
+        w.index_of(w.focus).unwrap_or(0)
     }
+    /// Focus a pane by its position in `panes()`.
     pub fn set_focus(&mut self, idx: usize) {
-        let n = self.panes().len();
-        if idx < n {
-            self.window_mut().focus = idx;
+        if let Some(id) = self.panes().get(idx).map(|p| p.id) {
+            self.window_mut().focus = id;
         }
-    }
-    pub fn split(&self) -> Split {
-        self.window().split
     }
     pub fn pane(&self) -> &Pane {
         let w = self.window();
-        &w.panes[w.focus]
+        &w.panes[w.index_of(w.focus).unwrap_or(0)]
+    }
+    /// Where the panes of the current window sit inside `area`, in the same
+    /// order as `panes()`.
+    pub fn pane_rects(&self, area: ratatui::layout::Rect) -> Vec<ratatui::layout::Rect> {
+        let w = self.window();
+        let placed = w.rects(area);
+        w.panes
+            .iter()
+            .map(|p| {
+                placed
+                    .iter()
+                    .find(|(id, _)| *id == p.id)
+                    .map(|(_, r)| *r)
+                    .unwrap_or(area)
+            })
+            .collect()
     }
 
     /// Starts (or restarts) the child for a pane of a window.
@@ -158,6 +197,11 @@ impl App {
                 self.fleet.set_health(&name, Health::Unreachable);
             }
         }
+    }
+
+    /// Remembers the region the panes are drawn in.
+    pub fn set_area(&mut self, area: ratatui::layout::Rect) {
+        self.last_area = area;
     }
 
     /// Tells the visible panes how big they are now.
@@ -214,16 +258,8 @@ impl App {
             .map(|i| i.name.clone())
             .unwrap_or_default();
         let instance = self.fresh_instance(&first);
-        self.windows.push(Window {
-            name: DEFAULT_WINDOW_NAME.to_string(),
-            panes: vec![Pane {
-                instance,
-                session: None,
-                error: None,
-            }],
-            focus: 0,
-            split: Split::Vertical,
-        });
+        self.windows
+            .push(Window::new(DEFAULT_WINDOW_NAME.to_string(), instance));
         self.current = self.windows.len() - 1;
         let w = self.current;
         self.start(w, 0);
@@ -263,13 +299,16 @@ impl App {
             }
             changed = true;
             for i in doomed.into_iter().rev() {
-                self.windows[w].panes.remove(i);
+                let gone = self.windows[w].panes.remove(i).id;
+                let layout = std::mem::replace(&mut self.windows[w].layout, Node::leaf(0));
+                if let Some(tree) = layout.remove_leaf(gone) {
+                    self.windows[w].layout = tree;
+                }
             }
             if self.windows[w].panes.is_empty() {
                 self.close_window(w);
-            } else {
-                let last = self.windows[w].panes.len() - 1;
-                self.windows[w].focus = self.windows[w].focus.min(last);
+            } else if self.windows[w].index_of(self.windows[w].focus).is_none() {
+                self.windows[w].focus = self.windows[w].panes[0].id;
             }
         }
         changed
@@ -278,21 +317,9 @@ impl App {
     /// Moves focus geometrically, so hjkl means what it looks like whether the
     /// panes are in a row, a column, or a 2x2 grid.
     fn focus_dir(&mut self, dir: Dir) {
-        let g = crate::layout::grid(self.panes().len(), self.split());
-        let cols = g.cols as usize;
-        let (row, col) = (self.focus() / cols, self.focus() % cols);
-        let (dr, dc) = match dir {
-            Dir::Left => (0i32, -1i32),
-            Dir::Right => (0, 1),
-            Dir::Up => (-1, 0),
-            Dir::Down => (1, 0),
-        };
-        let (r, c) = (row as i32 + dr, col as i32 + dc);
-        if r < 0 || c < 0 || c >= cols as i32 || r >= g.rows as i32 {
-            return;
-        }
-        let next = r as usize * cols + c as usize;
-        if next < self.panes().len() {
+        let area = self.last_area;
+        let w = self.window();
+        if let Some(next) = crate::layout::neighbour(&w.rects(area), w.focus, dir) {
             self.window_mut().focus = next;
         }
     }
@@ -352,21 +379,41 @@ impl App {
             Action::SelectWindow(n) => self.select_window(n),
 
             Action::Split(dir) => {
-                self.window_mut().split = dir;
-                if self.panes().len() >= MAX_PANES {
+                // Only the focused pane is divided; everything else keeps its
+                // shape. Refuse if the halves would be unusably small.
+                let focused = self.window().focus;
+                let Some(rect) = self
+                    .window()
+                    .rects(self.last_area)
+                    .into_iter()
+                    .find(|(id, _)| *id == focused)
+                    .map(|(_, r)| r)
+                else {
+                    return;
+                };
+                let fits = match dir {
+                    Split::Vertical => rect.width / 2 >= MIN_PANE.1,
+                    Split::Horizontal => rect.height / 2 >= MIN_PANE.0,
+                };
+                if !fits {
                     return;
                 }
+
                 let fallback = self.windows[w].panes[idx].instance.clone();
                 let next = self.fresh_instance(&fallback);
+                let id = self.windows[w].next_id;
+                self.windows[w].next_id += 1;
                 self.windows[w].panes.insert(
                     idx + 1,
                     Pane {
+                        id,
                         instance: next,
                         session: None,
                         error: None,
                     },
                 );
-                self.windows[w].focus = idx + 1;
+                self.windows[w].layout.split_leaf(focused, dir, id);
+                self.windows[w].focus = id;
                 self.start(w, idx + 1);
             }
             Action::ClosePane => {
@@ -375,13 +422,19 @@ impl App {
                     self.close_window(w);
                     return;
                 }
+                let gone = self.windows[w].focus;
                 self.windows[w].panes.remove(idx);
+                let layout = std::mem::replace(&mut self.windows[w].layout, Node::leaf(0));
+                if let Some(tree) = layout.remove_leaf(gone) {
+                    self.windows[w].layout = tree;
+                }
                 let last = self.windows[w].panes.len() - 1;
-                self.windows[w].focus = idx.min(last);
+                self.windows[w].focus = self.windows[w].panes[idx.min(last)].id;
             }
             Action::FocusNext => {
                 let n = self.panes().len();
-                self.window_mut().focus = (idx + 1) % n;
+                let next = (idx + 1) % n;
+                self.windows[w].focus = self.windows[w].panes[next].id;
             }
             Action::Focus(dir) => self.focus_dir(dir),
 
@@ -408,6 +461,7 @@ mod tests {
     use super::*;
     use crate::fleet::Grouping;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::layout::Rect;
     use std::time::{Duration, Instant};
 
     fn fleet() -> Fleet {
@@ -527,14 +581,14 @@ mod tests {
     }
 
     #[test]
-    fn windows_keep_their_own_split_direction() {
+    fn windows_keep_their_own_layout() {
         let mut a = app();
+        a.set_area(Rect::new(0, 0, 80, 24));
         a.apply(Action::Split(Split::Horizontal));
         a.apply(Action::NewWindow);
-        a.apply(Action::Split(Split::Vertical));
-        assert_eq!(a.split(), Split::Vertical);
+        assert_eq!(a.panes().len(), 1, "a new window starts fresh");
         a.select_window(0);
-        assert_eq!(a.split(), Split::Horizontal);
+        assert_eq!(a.panes().len(), 2, "the first window kept its split");
     }
 
     #[test]
@@ -634,12 +688,58 @@ mod tests {
     }
 
     #[test]
-    fn splitting_stops_at_the_pane_limit() {
+    fn splitting_is_refused_when_there_is_no_room_left() {
         let mut a = app();
-        for _ in 0..8 {
+        a.set_area(Rect::new(0, 0, 80, 24));
+        for _ in 0..20 {
             a.apply(Action::Split(Split::Vertical));
         }
-        assert_eq!(a.panes().len(), MAX_PANES);
+        let widths: Vec<u16> = a
+            .pane_rects(Rect::new(0, 0, 80, 24))
+            .iter()
+            .map(|r| r.width)
+            .collect();
+        assert!(
+            widths.iter().all(|w| *w >= MIN_PANE.1),
+            "panes should never be squeezed below the minimum: {widths:?}"
+        );
+    }
+
+    #[test]
+    fn a_split_divides_only_the_focused_pane() {
+        // Two side by side; focus the right one and stack it. The left pane
+        // must keep the full height.
+        let mut a = app();
+        let area = Rect::new(0, 0, 80, 24);
+        a.set_area(area);
+        a.apply(Action::Split(Split::Vertical));
+        assert_eq!(a.focus(), 1);
+
+        a.apply(Action::Split(Split::Horizontal));
+        assert_eq!(a.panes().len(), 3);
+
+        let r = a.pane_rects(area);
+        assert_eq!(r[0], Rect::new(0, 0, 40, 24), "left pane untouched");
+        assert_eq!(r[1], Rect::new(40, 0, 40, 12), "top right");
+        assert_eq!(r[2], Rect::new(40, 12, 40, 12), "bottom right");
+    }
+
+    #[test]
+    fn closing_a_pane_gives_its_space_back_to_its_sibling() {
+        let mut a = app();
+        let area = Rect::new(0, 0, 80, 24);
+        a.set_area(area);
+        a.apply(Action::Split(Split::Vertical));
+        a.apply(Action::Split(Split::Horizontal));
+        a.apply(Action::ClosePane);
+        assert_eq!(a.panes().len(), 2);
+        let r = a.pane_rects(area);
+        assert_eq!(r[0], Rect::new(0, 0, 40, 24));
+        assert_eq!(
+            r[1],
+            Rect::new(40, 0, 40, 24),
+            "sibling reclaimed the space"
+        );
     }
 
     #[test]
@@ -661,25 +761,28 @@ mod tests {
     }
 
     #[test]
-    fn hjkl_navigates_a_two_by_two_grid() {
+    fn hjkl_follows_the_actual_layout() {
+        // left pane full height, right pane split into top and bottom
         let mut a = app();
-        for _ in 0..3 {
-            a.apply(Action::Split(Split::Vertical));
-        }
-        a.set_focus(0);
+        a.set_area(Rect::new(0, 0, 80, 24));
+        a.apply(Action::Split(Split::Vertical));
+        a.apply(Action::Split(Split::Horizontal));
+        assert_eq!(a.focus(), 2, "the new bottom-right pane has focus");
+
+        a.apply(Action::Focus(Dir::Up));
+        assert_eq!(a.focus(), 1, "top right");
+        a.apply(Action::Focus(Dir::Left));
+        assert_eq!(a.focus(), 0, "the tall left pane");
         a.apply(Action::Focus(Dir::Right));
         assert_eq!(a.focus(), 1);
         a.apply(Action::Focus(Dir::Down));
-        assert_eq!(a.focus(), 3);
-        a.apply(Action::Focus(Dir::Left));
         assert_eq!(a.focus(), 2);
-        a.apply(Action::Focus(Dir::Up));
-        assert_eq!(a.focus(), 0);
     }
 
     #[test]
     fn focus_stops_at_the_edges_instead_of_wrapping() {
         let mut a = app();
+        a.set_area(Rect::new(0, 0, 80, 24));
         a.apply(Action::Split(Split::Vertical));
         a.apply(Action::Focus(Dir::Left));
         a.apply(Action::Focus(Dir::Left));

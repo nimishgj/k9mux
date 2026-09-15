@@ -54,13 +54,28 @@ Moving between panes needs no prefix:
 | `⌥h` `⌥j` `⌥k` `⌥l` | move focus left / down / up / right |
 | `⌥space` `Tab` | focus the next pane |
 
-Focus movement is geometric. With four panes in a 2×2 grid, `⌥j` from the
-top-left goes to the bottom-left, not "the next one", and focus stops at the
-edges instead of wrapping.
+A split divides **the focused pane**, not the whole window — the same as tmux.
+Split once with `%` and you get two panes side by side; focus the right one and
+press `"` and only that pane is stacked, leaving the left one full height:
 
-A window holds up to four panes; the fourth arranges them 2×2. Each window
-keeps its own panes, its own focused pane and its own split direction, so
-switching windows puts everything back exactly as you left it.
+```
+┌──────────┬──────────┐
+│          │    2     │
+│    1     ├──────────┤
+│          │    3     │
+└──────────┴──────────┘
+```
+
+Closing a pane gives its space back to the pane it was split from. A split is
+refused if the halves would be too small to be useful, so there is no fixed
+pane limit — just how much room you have.
+
+Focus movement is geometric: `⌥h` from pane 3 above goes to pane 1, because
+that is what is actually to its left. Focus stops at the edges rather than
+wrapping.
+
+Each window keeps its own panes, layout and focused pane, so switching windows
+puts everything back exactly as you left it.
 
 Renaming opens an inline prompt in the sidebar, pre-filled with the current
 name. `Enter` commits, `Esc` cancels, and an empty name keeps the old one.
