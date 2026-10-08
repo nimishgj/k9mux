@@ -627,6 +627,15 @@ impl App {
                 self.windows[w].focus = self.windows[w].panes[next].id;
             }
             Action::Focus(dir) => self.focus_dir(dir),
+            Action::Resize(dir) => {
+                // A zoomed pane already owns the window; there is no border.
+                if self.window().zoomed.is_none() {
+                    let focused = self.window().focus;
+                    self.window_mut()
+                        .layout
+                        .resize(focused, dir, crate::layout::RESIZE_STEP);
+                }
+            }
 
             Action::NextInstance | Action::PrevInstance => {
                 let step = if action == Action::NextInstance {
@@ -1132,6 +1141,93 @@ mod tests {
         assert!(!a.sidebar);
         a.apply(Action::ToggleSidebar);
         assert!(a.sidebar);
+    }
+
+    // ---- manual resize ----
+
+    #[test]
+    fn resizing_moves_the_border_between_two_panes() {
+        let mut a = app();
+        let area = Rect::new(0, 0, 80, 24);
+        a.set_area(area);
+        a.apply(Action::Split(Split::Vertical));
+        assert_eq!(a.pane_rects(area)[0].width, 40);
+
+        // focus is on the right pane, so growing it left takes from the left
+        a.apply(Action::Resize(Dir::Left));
+        let r = a.pane_rects(area);
+        assert!(r[1].width > 40, "focused pane grew: {r:?}");
+        assert_eq!(r[0].width + r[1].width, 80);
+    }
+
+    #[test]
+    fn resizing_is_repeatable_and_then_stops() {
+        let mut a = app();
+        let area = Rect::new(0, 0, 80, 24);
+        a.set_area(area);
+        a.apply(Action::Split(Split::Vertical));
+        for _ in 0..40 {
+            a.apply(Action::Resize(Dir::Left));
+        }
+        let r = a.pane_rects(area);
+        assert!(r[0].width >= 1, "the other pane survives: {r:?}");
+        assert_eq!(r[0].width + r[1].width, 80);
+    }
+
+    #[test]
+    fn a_resize_sticks_across_a_redraw() {
+        let mut a = app();
+        let area = Rect::new(0, 0, 80, 24);
+        a.set_area(area);
+        a.apply(Action::Split(Split::Vertical));
+        a.apply(Action::Resize(Dir::Left));
+        let after = a.pane_rects(area);
+        assert_eq!(a.pane_rects(area), after, "layout is stable");
+    }
+
+    #[test]
+    fn resizing_a_zoomed_pane_does_nothing() {
+        let mut a = app();
+        let area = Rect::new(0, 0, 80, 24);
+        a.set_area(area);
+        a.apply(Action::Split(Split::Vertical));
+        let before = a.pane_rects(area);
+        a.apply(Action::ToggleZoom);
+        a.apply(Action::Resize(Dir::Left));
+        a.apply(Action::ToggleZoom);
+        assert_eq!(
+            a.pane_rects(area),
+            before,
+            "the layout underneath is untouched"
+        );
+    }
+
+    #[test]
+    fn resizing_a_lone_pane_is_harmless() {
+        let mut a = app();
+        let area = Rect::new(0, 0, 80, 24);
+        a.set_area(area);
+        a.apply(Action::Resize(Dir::Left));
+        assert_eq!(a.pane_rects(area)[0], area);
+    }
+
+    #[test]
+    fn the_child_is_told_about_its_new_size() {
+        let mut a = app();
+        let area = Rect::new(0, 0, 80, 24);
+        a.set_area(area);
+        a.apply(Action::Split(Split::Vertical));
+        a.apply(Action::Resize(Dir::Left));
+
+        let sizes: Vec<(usize, (u16, u16))> = a
+            .visible_panes()
+            .into_iter()
+            .map(|(i, r)| (i, (r.height - 2, r.width - 2)))
+            .collect();
+        a.resize_panes(&sizes);
+        for (i, expected) in &sizes {
+            assert_eq!(a.panes()[*i].session.as_ref().unwrap().size(), *expected);
+        }
     }
 
     // ---- zoom ----

@@ -178,6 +178,10 @@ pub fn parse_command(text: &str) -> Option<Action> {
         "focus-up" => Action::Focus(Dir::Up),
         "focus-down" => Action::Focus(Dir::Down),
         "focus-next" => Action::FocusNext,
+        "resize-left" => Action::Resize(Dir::Left),
+        "resize-right" => Action::Resize(Dir::Right),
+        "resize-up" => Action::Resize(Dir::Up),
+        "resize-down" => Action::Resize(Dir::Down),
         "next-cluster" => Action::NextInstance,
         "prev-cluster" => Action::PrevInstance,
         "new-window" => Action::NewWindow,
@@ -210,6 +214,10 @@ pub fn command_name(action: &Action) -> &'static str {
         Action::Focus(Dir::Up) => "focus-up",
         Action::Focus(Dir::Down) => "focus-down",
         Action::FocusNext => "focus-next",
+        Action::Resize(Dir::Left) => "resize-left",
+        Action::Resize(Dir::Right) => "resize-right",
+        Action::Resize(Dir::Up) => "resize-up",
+        Action::Resize(Dir::Down) => "resize-down",
         Action::NextInstance => "next-cluster",
         Action::PrevInstance => "prev-cluster",
         Action::NewWindow => "new-window",
@@ -244,6 +252,10 @@ bind '\"' split-horizontal
 bind %   split-vertical
 bind x   close-pane
 bind Tab focus-next
+bind H   resize-left
+bind J   resize-down
+bind K   resize-up
+bind L   resize-right
 bind '<' prev-cluster
 bind '>' next-cluster
 bind z   zoom
@@ -280,6 +292,10 @@ impl Default for Keymap {
             ("%", "split-vertical"),
             ("x", "close-pane"),
             ("Tab", "focus-next"),
+            ("H", "resize-left"),
+            ("J", "resize-down"),
+            ("K", "resize-up"),
+            ("L", "resize-right"),
             ("<", "prev-cluster"),
             (">", "next-cluster"),
             ("z", "zoom"),
@@ -453,6 +469,10 @@ mod tests {
             Action::Focus(Dir::Up),
             Action::Focus(Dir::Down),
             Action::FocusNext,
+            Action::Resize(Dir::Left),
+            Action::Resize(Dir::Right),
+            Action::Resize(Dir::Up),
+            Action::Resize(Dir::Down),
             Action::NextInstance,
             Action::PrevInstance,
             Action::NewWindow,
@@ -493,6 +513,14 @@ mod tests {
         assert_eq!(km.resolve(k('x'), true), Outcome::Do(Action::ClosePane));
         assert_eq!(km.resolve(k('e'), true), Outcome::Do(Action::ToggleSidebar));
         assert_eq!(km.resolve(k('z'), true), Outcome::Do(Action::ToggleZoom));
+        assert_eq!(
+            km.resolve(k('L'), true),
+            Outcome::Do(Action::Resize(Dir::Right))
+        );
+        assert_eq!(
+            km.resolve(k('J'), true),
+            Outcome::Do(Action::Resize(Dir::Down))
+        );
         assert_eq!(km.resolve(k('w'), true), Outcome::Do(Action::ClusterPicker));
         assert_eq!(
             km.resolve(k('g'), true),

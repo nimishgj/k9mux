@@ -45,6 +45,7 @@ All of these are typed after the prefix, `option-space` by default, written
 | `⌥space` `%` | split the window into side-by-side panes |
 | `⌥space` `"` | split the window into stacked panes |
 | `⌥space` `x` | close the focused pane |
+| `⌥space` `H` `J` `K` `L` | resize: move the pane's border left/down/up/right |
 | `⌥space` `z` | zoom the focused pane to fill the window |
 | `⌥space` `r` | restart k9s in the focused pane |
 
@@ -81,6 +82,18 @@ puts everything back exactly as you left it.
 Renaming opens an inline prompt in the sidebar, pre-filled with the current
 name. `Enter` commits, `Esc` cancels, and an empty name keeps the old one.
 While you are typing a name, keys go to the prompt rather than to k9s.
+
+## Resizing
+
+`⌥space H J K L` move the border the focused pane sits against, 5% a press.
+A pane before the border grows as the border moves away from it; a pane after
+it shrinks. Every key always does something, so any resize can be undone from
+the same pane by pressing the opposite one.
+
+With nested splits the *nearest* border on that axis moves, so resizing the
+top-right pane vertically adjusts the split it shares with the pane below,
+leaving the rest of the window alone. A border stops before it would crush a
+pane out of existence.
 
 ## Zoom
 

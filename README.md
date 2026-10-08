@@ -38,6 +38,7 @@ prefix, `option-space` by default. Moving between panes needs no prefix.
 | `⌥space` `%` `"` | split the focused pane, side-by-side / stacked |
 | `⌥space` `x` | close the pane |
 | `⌥space` `<` `>` | previous / next cluster in the focused pane |
+| `⌥space` `H` `J` `K` `L` | resize the pane (move its border) |
 | `⌥space` `z` | zoom the focused pane |
 | `⌥space` `w` | pick a cluster by name |
 | `⌥space` `g` | a window per cluster group |
@@ -107,5 +108,4 @@ and macOS, since the pty layer is the part most likely to differ.
 
 - No session persistence: closing k9mux kills its k9s processes.
 - Health probes are a TCP connect to the API server — reachability, not auth.
-- Panes can't be resized by hand; splits are always even.
 - No scrollback beyond what k9s itself draws.

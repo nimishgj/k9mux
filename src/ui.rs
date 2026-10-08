@@ -30,6 +30,8 @@ const SUMMARY: &[(&str, &str)] = &[
     ("focus-right", "focus right"),
     ("next-cluster", "next cluster"),
     ("prev-cluster", "prev cluster"),
+    ("resize-left", "resize ←"),
+    ("resize-right", "resize →"),
     ("zoom", "zoom pane"),
     ("choose-cluster", "choose cluster"),
     ("spread-clusters", "window per cluster"),

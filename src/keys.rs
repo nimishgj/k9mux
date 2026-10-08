@@ -7,6 +7,7 @@ pub enum Action {
     Split(Split),
     ClosePane,
     Focus(Dir),
+    Resize(Dir),
     FocusNext,
     NextInstance,
     PrevInstance,

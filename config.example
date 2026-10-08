@@ -18,6 +18,10 @@ bind '"' split-horizontal
 bind %   split-vertical
 bind x   close-pane
 bind Tab focus-next
+bind H   resize-left
+bind J   resize-down
+bind K   resize-up
+bind L   resize-right
 bind '<' prev-cluster
 bind '>' next-cluster
 bind z   zoom
@@ -43,6 +47,11 @@ bind -n M-j focus-down
 bind -n M-k focus-up
 bind -n M-l focus-right
 
+bind -n M-h focus-left
+bind -n M-j focus-down
+bind -n M-k focus-up
+bind -n M-l focus-right
+
 # Hand a key back to k9s
 # unbind x
 
@@ -50,6 +59,7 @@ bind -n M-l focus-right
 #            Space Tab Enter Escape BSpace Up Down Left Right F1..F12
 # Commands:  new-window rename-window next-window prev-window
 #            zoom choose-cluster spread-clusters
+#            resize-left resize-right resize-up resize-down
 #            select-window-0 .. select-window-9
 #            split-vertical split-horizontal close-pane
 #            focus-left focus-right focus-up focus-down focus-next

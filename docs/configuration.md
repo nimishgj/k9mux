@@ -101,6 +101,7 @@ sends `alt`+`h` or `˙`.
 | `close-pane` | close the focused pane |
 | `focus-left` `focus-right` `focus-up` `focus-down` | move focus geometrically |
 | `focus-next` | cycle to the next pane |
+| `resize-left` `resize-right` `resize-up` `resize-down` | move the focused pane's border |
 | `zoom` | blow the focused pane up to fill the window |
 | `restart` | restart k9s in the focused pane |
 
