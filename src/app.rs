@@ -52,6 +52,8 @@ pub struct Window {
     pub focus: PaneId,
     /// How the panes are carved up.
     pub layout: Node,
+    /// When set, this pane fills the window and the rest are hidden.
+    pub zoomed: Option<PaneId>,
     next_id: PaneId,
 }
 
@@ -67,15 +69,24 @@ impl Window {
             }],
             focus: 1,
             layout: Node::leaf(1),
+            zoomed: None,
             next_id: 2,
         }
     }
     pub fn index_of(&self, id: PaneId) -> Option<usize> {
         self.panes.iter().position(|p| p.id == id)
     }
-    /// Panes and their rects, in layout order.
+    /// Panes and their rects, in layout order. A zoomed pane takes the lot
+    /// and the others are not placed at all.
     pub fn rects(&self, area: ratatui::layout::Rect) -> Vec<(PaneId, ratatui::layout::Rect)> {
-        self.layout.rects(area)
+        match self.zoomed {
+            Some(id) if self.index_of(id).is_some() => vec![(id, area)],
+            _ => self.layout.rects(area),
+        }
+    }
+    /// True when this pane is hidden behind a zoom.
+    pub fn hidden(&self, id: PaneId) -> bool {
+        self.zoomed.is_some_and(|z| z != id)
     }
 }
 
@@ -84,6 +95,11 @@ impl Window {
 pub enum Mode {
     Normal,
     Rename(String),
+    /// Choosing a cluster for the focused pane.
+    Picker {
+        query: String,
+        selected: usize,
+    },
 }
 
 pub struct App {
@@ -102,6 +118,8 @@ pub struct App {
     pane_size: (u16, u16),
     /// The area the panes were last laid out in, for geometry decisions.
     last_area: ratatui::layout::Rect,
+    /// Watches whether the clusters are actually answering.
+    prober: Option<crate::probe::Prober>,
 }
 
 impl App {
@@ -128,6 +146,7 @@ impl App {
             spawn,
             pane_size: (24, 80),
             last_area: ratatui::layout::Rect::new(0, 0, 80, 24),
+            prober: None,
         };
         app.start(0, 0);
         app
@@ -158,6 +177,16 @@ impl App {
         let w = self.window();
         &w.panes[w.index_of(w.focus).unwrap_or(0)]
     }
+    /// The panes actually on screen and where they sit: every pane normally,
+    /// or just the zoomed one.
+    pub fn visible_panes(&self) -> Vec<(usize, ratatui::layout::Rect)> {
+        let w = self.window();
+        w.rects(self.last_area)
+            .into_iter()
+            .filter_map(|(id, r)| w.index_of(id).map(|i| (i, r)))
+            .collect()
+    }
+
     /// Where the panes of the current window sit inside `area`, in the same
     /// order as `panes()`.
     pub fn pane_rects(&self, area: ratatui::layout::Rect) -> Vec<ratatui::layout::Rect> {
@@ -189,7 +218,9 @@ impl App {
             Ok(s) => {
                 self.windows[win].panes[idx].session = Some(s);
                 self.windows[win].panes[idx].error = None;
-                self.fleet.set_health(&name, Health::Ok);
+                // Whether the cluster is healthy is the prober's call, not
+                // something a started process can tell us.
+                let _ = &name;
             }
             Err(e) => {
                 self.windows[win].panes[idx].session = None;
@@ -199,19 +230,47 @@ impl App {
         }
     }
 
+    /// Starts watching these clusters for reachability.
+    pub fn watch(&mut self, targets: Vec<crate::probe::Target>) {
+        self.prober = Some(crate::probe::Prober::spawn(
+            targets,
+            std::time::Duration::from_secs(15),
+            std::time::Duration::from_secs(3),
+        ));
+    }
+
+    /// Applies any probe results. Returns true if a cluster changed state.
+    pub fn poll_health(&mut self) -> bool {
+        let Some(p) = self.prober.as_ref() else {
+            return false;
+        };
+        let mut changed = false;
+        for (instance, ok) in p.drain() {
+            let want = if ok { Health::Ok } else { Health::Unreachable };
+            if self.fleet.find(&instance).map(|i| i.health) != Some(want) {
+                self.fleet.set_health(&instance, want);
+                changed = true;
+            }
+        }
+        changed
+    }
+
     /// Remembers the region the panes are drawn in.
     pub fn set_area(&mut self, area: ratatui::layout::Rect) {
         self.last_area = area;
     }
 
-    /// Tells the visible panes how big they are now.
-    pub fn resize_panes(&mut self, sizes: &[(u16, u16)]) {
-        if let Some(first) = sizes.first() {
+    /// Tells the on-screen panes how big they are now, by pane index. Panes
+    /// hidden behind a zoom keep the size they had.
+    pub fn resize_panes(&mut self, sizes: &[(usize, (u16, u16))]) {
+        if let Some((_, first)) = sizes.first() {
             self.pane_size = *first;
         }
-        let i = self.current;
-        for (pane, (rows, cols)) in self.windows[i].panes.iter_mut().zip(sizes) {
-            if let Some(s) = pane.session.as_mut() {
+        let w = self.current;
+        for (idx, (rows, cols)) in sizes {
+            if let Some(pane) = self.windows[w].panes.get_mut(*idx)
+                && let Some(s) = pane.session.as_mut()
+            {
                 s.resize(*rows, *cols);
             }
         }
@@ -324,6 +383,155 @@ impl App {
         }
     }
 
+    /// Clusters offered by the picker, already filtered by what was typed.
+    pub fn picker_matches(&self) -> Vec<String> {
+        let Mode::Picker { query, .. } = &self.mode else {
+            return Vec::new();
+        };
+        let all: Vec<String> = self
+            .fleet
+            .instances()
+            .iter()
+            .map(|i| i.name.clone())
+            .collect();
+        crate::picker::rank(&all, query)
+            .into_iter()
+            .map(String::from)
+            .collect()
+    }
+
+    /// Handles a key while the cluster picker is open. Returns true once it
+    /// has closed.
+    pub fn picker_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        use crossterm::event::KeyCode;
+        let hits = self.picker_matches();
+        let Mode::Picker { query, selected } = &mut self.mode else {
+            return true;
+        };
+        match key.code {
+            KeyCode::Char(c) => {
+                query.push(c);
+                *selected = 0;
+                false
+            }
+            KeyCode::Backspace => {
+                query.pop();
+                *selected = 0;
+                false
+            }
+            KeyCode::Down => {
+                *selected = (*selected + 1).min(hits.len().saturating_sub(1));
+                false
+            }
+            KeyCode::Up => {
+                *selected = selected.saturating_sub(1);
+                false
+            }
+            KeyCode::Enter => {
+                let chosen = hits.get(*selected).cloned();
+                self.mode = Mode::Normal;
+                if let Some(name) = chosen {
+                    self.attach(&name);
+                }
+                true
+            }
+            KeyCode::Esc => {
+                self.mode = Mode::Normal;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Opens a window per cluster group, each holding a pane per context in
+    /// that group. This is the thing a plain multiplexer cannot do for you,
+    /// because it has no idea what a cluster is.
+    pub fn spread_clusters(&mut self) {
+        let groups: Vec<(String, Vec<String>)> = self
+            .fleet
+            .groups
+            .iter()
+            .map(|g| {
+                (
+                    g.name.clone(),
+                    g.instances.iter().map(|i| i.name.clone()).collect(),
+                )
+            })
+            .filter(|(_, members): &(String, Vec<String>)| !members.is_empty())
+            .collect();
+
+        for (name, members) in groups {
+            let mut iter = members.into_iter();
+            let Some(first) = iter.next() else { continue };
+            self.windows.push(Window::new(name, first));
+            self.current = self.windows.len() - 1;
+            let w = self.current;
+            self.start(w, 0);
+
+            // Fill the window with the rest, alternating the split so the
+            // panes stay roughly square, and stopping when there is no room.
+            for (n, instance) in iter.enumerate() {
+                let dir = if n % 2 == 0 {
+                    Split::Horizontal
+                } else {
+                    Split::Vertical
+                };
+                if !self.split_focused_with(dir, Some(instance)) {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Splits the focused pane, optionally forcing which cluster the new pane
+    /// runs. Returns false when there was no room.
+    fn split_focused_with(&mut self, dir: Split, instance: Option<String>) -> bool {
+        let w = self.current;
+        let focused = self.window().focus;
+        let Some(idx) = self.window().index_of(focused) else {
+            return false;
+        };
+        let Some(rect) = self
+            .window()
+            .rects(self.last_area)
+            .into_iter()
+            .find(|(id, _)| *id == focused)
+            .map(|(_, r)| r)
+        else {
+            return false;
+        };
+        let fits = match dir {
+            Split::Vertical => rect.width / 2 >= MIN_PANE.1,
+            Split::Horizontal => rect.height / 2 >= MIN_PANE.0,
+        };
+        if !fits {
+            return false;
+        }
+        let next = match instance {
+            Some(i) => i,
+            None => {
+                let fallback = self.windows[w].panes[idx].instance.clone();
+                self.fresh_instance(&fallback)
+            }
+        };
+        let id = self.windows[w].next_id;
+        self.windows[w].next_id += 1;
+        self.windows[w].panes.insert(
+            idx + 1,
+            Pane {
+                id,
+                instance: next,
+                session: None,
+                error: None,
+            },
+        );
+        self.windows[w].layout.split_leaf(focused, dir, id);
+        self.windows[w].focus = id;
+        self.windows[w].zoomed = None;
+        self.start(w, idx + 1);
+        true
+    }
+
     /// Handles a key while a window name is being typed. Returns true when the
     /// rename is over, either way.
     pub fn rename_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
@@ -363,6 +571,21 @@ impl App {
             Action::Quit => self.should_quit = true,
             Action::ToggleHelp => self.help = !self.help,
             Action::ToggleSidebar => self.sidebar = !self.sidebar,
+            Action::ToggleZoom => {
+                let focused = self.window().focus;
+                let w = self.window_mut();
+                w.zoomed = match w.zoomed {
+                    Some(_) => None,
+                    None => Some(focused),
+                };
+            }
+            Action::ClusterPicker => {
+                self.mode = Mode::Picker {
+                    query: String::new(),
+                    selected: 0,
+                };
+            }
+            Action::SpreadClusters => self.spread_clusters(),
             Action::Restart => self.start(w, idx),
 
             Action::NewWindow => self.new_window(),
@@ -378,43 +601,9 @@ impl App {
             }
             Action::SelectWindow(n) => self.select_window(n),
 
+            // Only the focused pane is divided; everything else keeps its shape.
             Action::Split(dir) => {
-                // Only the focused pane is divided; everything else keeps its
-                // shape. Refuse if the halves would be unusably small.
-                let focused = self.window().focus;
-                let Some(rect) = self
-                    .window()
-                    .rects(self.last_area)
-                    .into_iter()
-                    .find(|(id, _)| *id == focused)
-                    .map(|(_, r)| r)
-                else {
-                    return;
-                };
-                let fits = match dir {
-                    Split::Vertical => rect.width / 2 >= MIN_PANE.1,
-                    Split::Horizontal => rect.height / 2 >= MIN_PANE.0,
-                };
-                if !fits {
-                    return;
-                }
-
-                let fallback = self.windows[w].panes[idx].instance.clone();
-                let next = self.fresh_instance(&fallback);
-                let id = self.windows[w].next_id;
-                self.windows[w].next_id += 1;
-                self.windows[w].panes.insert(
-                    idx + 1,
-                    Pane {
-                        id,
-                        instance: next,
-                        session: None,
-                        error: None,
-                    },
-                );
-                self.windows[w].layout.split_leaf(focused, dir, id);
-                self.windows[w].focus = id;
-                self.start(w, idx + 1);
+                self.split_focused_with(dir, None);
             }
             Action::ClosePane => {
                 if self.panes().len() == 1 {
@@ -430,6 +619,7 @@ impl App {
                 }
                 let last = self.windows[w].panes.len() - 1;
                 self.windows[w].focus = self.windows[w].panes[idx.min(last)].id;
+                self.windows[w].zoomed = None;
             }
             Action::FocusNext => {
                 let n = self.panes().len();
@@ -921,7 +1111,7 @@ mod tests {
     fn panes_are_resized_to_their_share_of_the_screen() {
         let mut a = app();
         a.apply(Action::Split(Split::Vertical));
-        a.resize_panes(&[(30, 60), (30, 61)]);
+        a.resize_panes(&[(0, (30, 60)), (1, (30, 61))]);
         assert_eq!(a.panes()[0].session.as_ref().unwrap().size(), (30, 60));
         assert_eq!(a.panes()[1].session.as_ref().unwrap().size(), (30, 61));
     }
@@ -929,7 +1119,7 @@ mod tests {
     #[test]
     fn a_new_pane_starts_at_the_current_pane_size() {
         let mut a = app();
-        a.resize_panes(&[(40, 100)]);
+        a.resize_panes(&[(0, (40, 100))]);
         a.apply(Action::Split(Split::Vertical));
         assert_eq!(a.panes()[1].session.as_ref().unwrap().size(), (40, 100));
     }
@@ -942,6 +1132,199 @@ mod tests {
         assert!(!a.sidebar);
         a.apply(Action::ToggleSidebar);
         assert!(a.sidebar);
+    }
+
+    // ---- zoom ----
+
+    #[test]
+    fn zooming_gives_the_focused_pane_the_whole_window() {
+        let mut a = app();
+        let area = Rect::new(0, 0, 80, 24);
+        a.set_area(area);
+        a.apply(Action::Split(Split::Vertical));
+        assert_eq!(a.pane_rects(area)[1], Rect::new(40, 0, 40, 24));
+
+        a.apply(Action::ToggleZoom);
+        assert_eq!(a.window().zoomed, Some(a.window().focus));
+        assert_eq!(a.visible_panes().len(), 1, "only the zoomed pane is shown");
+        assert_eq!(a.visible_panes()[0].1, area, "and it fills the window");
+    }
+
+    #[test]
+    fn unzooming_puts_the_layout_back_exactly() {
+        let mut a = app();
+        let area = Rect::new(0, 0, 80, 24);
+        a.set_area(area);
+        a.apply(Action::Split(Split::Vertical));
+        a.apply(Action::Split(Split::Horizontal));
+        let before = a.pane_rects(area);
+
+        a.apply(Action::ToggleZoom);
+        a.apply(Action::ToggleZoom);
+        assert_eq!(a.window().zoomed, None);
+        assert_eq!(a.pane_rects(area), before);
+    }
+
+    #[test]
+    fn a_zoomed_pane_still_takes_the_keys() {
+        let mut a = app();
+        a.set_area(Rect::new(0, 0, 80, 24));
+        a.apply(Action::Split(Split::Vertical));
+        let focused = a.focus();
+        a.apply(Action::ToggleZoom);
+        assert_eq!(a.focus(), focused);
+    }
+
+    #[test]
+    fn splitting_while_zoomed_unzooms_first() {
+        let mut a = app();
+        a.set_area(Rect::new(0, 0, 80, 24));
+        a.apply(Action::ToggleZoom);
+        a.apply(Action::Split(Split::Vertical));
+        assert_eq!(a.window().zoomed, None, "tmux unzooms when you split");
+        assert_eq!(a.panes().len(), 2);
+    }
+
+    #[test]
+    fn closing_a_pane_clears_the_zoom() {
+        let mut a = app();
+        a.set_area(Rect::new(0, 0, 80, 24));
+        a.apply(Action::Split(Split::Vertical));
+        a.apply(Action::ToggleZoom);
+        a.apply(Action::ClosePane);
+        assert_eq!(a.window().zoomed, None);
+        assert_eq!(a.visible_panes().len(), 1);
+    }
+
+    #[test]
+    fn zoom_belongs_to_its_window() {
+        let mut a = app();
+        a.set_area(Rect::new(0, 0, 80, 24));
+        a.apply(Action::Split(Split::Vertical));
+        a.apply(Action::ToggleZoom);
+        a.apply(Action::NewWindow);
+        assert_eq!(a.window().zoomed, None);
+        a.select_window(0);
+        assert!(
+            a.window().zoomed.is_some(),
+            "the first window is still zoomed"
+        );
+    }
+
+    // ---- cluster picker ----
+
+    #[test]
+    fn the_picker_offers_every_cluster_until_you_type() {
+        let mut a = app();
+        a.apply(Action::ClusterPicker);
+        assert_eq!(a.picker_matches().len(), a.fleet.instances().len());
+    }
+
+    #[test]
+    fn typing_narrows_the_picker() {
+        let mut a = app();
+        a.apply(Action::ClusterPicker);
+        a.picker_key(key('e'));
+        a.picker_key(key('u'));
+        let hits = a.picker_matches();
+        assert!(hits.contains(&"euc1-a".to_string()), "{hits:?}");
+        assert!(!hits.contains(&"use1-b".to_string()), "{hits:?}");
+    }
+
+    #[test]
+    fn enter_attaches_the_chosen_cluster_to_the_focused_pane() {
+        let mut a = app();
+        a.apply(Action::ClusterPicker);
+        for c in "euc".chars() {
+            a.picker_key(key(c));
+        }
+        assert!(a.picker_key(code(KeyCode::Enter)));
+        assert_eq!(a.mode, Mode::Normal);
+        assert_eq!(a.pane().instance, "euc1-a");
+        wait_for(&a, 0, 0, |t| t.contains("k9s ctx=euc1-a"));
+    }
+
+    #[test]
+    fn the_picker_can_be_walked_with_the_arrows() {
+        let mut a = app();
+        a.apply(Action::ClusterPicker);
+        let second = a.picker_matches()[1].clone();
+        a.picker_key(code(KeyCode::Down));
+        a.picker_key(code(KeyCode::Enter));
+        assert_eq!(a.pane().instance, second);
+    }
+
+    #[test]
+    fn escape_closes_the_picker_without_changing_anything() {
+        let mut a = app();
+        let before = a.pane().instance.clone();
+        a.apply(Action::ClusterPicker);
+        a.picker_key(key('e'));
+        assert!(a.picker_key(code(KeyCode::Esc)));
+        assert_eq!(a.mode, Mode::Normal);
+        assert_eq!(a.pane().instance, before);
+    }
+
+    #[test]
+    fn enter_on_an_empty_result_does_nothing() {
+        let mut a = app();
+        let before = a.pane().instance.clone();
+        a.apply(Action::ClusterPicker);
+        for c in "zzzz".chars() {
+            a.picker_key(key(c));
+        }
+        assert!(a.picker_matches().is_empty());
+        a.picker_key(code(KeyCode::Enter));
+        assert_eq!(a.pane().instance, before);
+        assert_eq!(a.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn picker_keys_do_not_reach_k9s() {
+        let mut a = app();
+        a.apply(Action::ClusterPicker);
+        a.picker_key(key('q'));
+        assert!(!a.should_quit);
+    }
+
+    // ---- a window per cluster group ----
+
+    #[test]
+    fn spreading_opens_a_window_per_cluster_group() {
+        let mut a = app();
+        a.set_area(Rect::new(0, 0, 200, 60));
+        a.apply(Action::SpreadClusters);
+
+        let names: Vec<String> = a.windows.iter().map(|w| w.name.clone()).collect();
+        assert!(names.contains(&"prod-us".to_string()), "{names:?}");
+        assert!(names.contains(&"prod-eu".to_string()), "{names:?}");
+    }
+
+    #[test]
+    fn each_spread_window_holds_that_groups_clusters() {
+        let mut a = app();
+        a.set_area(Rect::new(0, 0, 200, 60));
+        a.apply(Action::SpreadClusters);
+
+        let us = a.windows.iter().find(|w| w.name == "prod-us").unwrap();
+        let open: Vec<String> = us.panes.iter().map(|p| p.instance.clone()).collect();
+        assert_eq!(open, vec!["use1-a", "use1-b"]);
+
+        let eu = a.windows.iter().find(|w| w.name == "prod-eu").unwrap();
+        let open: Vec<String> = eu.panes.iter().map(|p| p.instance.clone()).collect();
+        assert_eq!(open, vec!["usw2-b", "euc1-a"]);
+    }
+
+    #[test]
+    fn spreading_into_a_tiny_terminal_stops_rather_than_squeezing() {
+        let mut a = app();
+        a.set_area(Rect::new(0, 0, 20, 6));
+        a.apply(Action::SpreadClusters);
+        for w in &a.windows {
+            for (_, r) in w.rects(Rect::new(0, 0, 20, 6)) {
+                assert!(r.width >= MIN_PANE.1 || w.panes.len() == 1, "{r:?}");
+            }
+        }
     }
 
     #[test]

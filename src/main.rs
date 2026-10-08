@@ -113,16 +113,19 @@ fn build() -> Result<App, String> {
     })?;
 
     let kubeconfig_env = loaded.kubeconfig_env();
+    let targets = loaded.probe_targets();
     let grouping = if config.clusters.is_empty() {
         loaded.grouping
     } else {
         config.grouping()
     };
-    Ok(App::with_keymap(
+    let mut app = App::with_keymap(
         Fleet::from_contexts(&loaded.contexts, &grouping),
         k9s_launch(&kubeconfig_env),
         config.keymap,
-    ))
+    );
+    app.watch(targets);
+    Ok(app)
 }
 
 fn main() {
@@ -174,6 +177,12 @@ fn event_loop<B: ratatui::backend::Backend>(
                 {
                     app.rename_key(k);
                 }
+                // The cluster picker owns the keyboard while it is open.
+                Event::Key(k)
+                    if k.kind == KeyEventKind::Press && matches!(app.mode, Mode::Picker { .. }) =>
+                {
+                    app.picker_key(k);
+                }
                 Event::Key(k) if k.kind == KeyEventKind::Press => {
                     match app.keymap.resolve(k, app.armed) {
                         Outcome::Armed => app.armed = true,
@@ -213,6 +222,7 @@ fn event_loop<B: ratatui::backend::Backend>(
 
         // A pane whose k9s has quit goes away, like a shell exiting in tmux.
         app.reap();
+        app.poll_health();
 
         if app.should_quit {
             return Ok(());

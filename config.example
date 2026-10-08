@@ -20,10 +20,18 @@ bind x   close-pane
 bind Tab focus-next
 bind '<' prev-cluster
 bind '>' next-cluster
+bind z   zoom
+bind w   choose-cluster
+bind g   spread-clusters
 bind r   restart
 bind e   toggle-sidebar
 bind ?   help
 bind q   quit
+
+bind -n M-h focus-left
+bind -n M-j focus-down
+bind -n M-k focus-up
+bind -n M-l focus-right
 
 bind -n M-h focus-left
 bind -n M-j focus-down
@@ -41,6 +49,7 @@ bind -n M-l focus-right
 # Keys:      a single character, or C-x / M-x, or a name such as
 #            Space Tab Enter Escape BSpace Up Down Left Right F1..F12
 # Commands:  new-window rename-window next-window prev-window
+#            zoom choose-cluster spread-clusters
 #            select-window-0 .. select-window-9
 #            split-vertical split-horizontal close-pane
 #            focus-left focus-right focus-up focus-down focus-next

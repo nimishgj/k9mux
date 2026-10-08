@@ -8,11 +8,34 @@ use std::path::{Path, PathBuf};
 struct RawKubeconfig {
     #[serde(default)]
     contexts: Vec<RawContext>,
+    #[serde(default)]
+    clusters: Vec<RawCluster>,
 }
 
 #[derive(Deserialize)]
 struct RawContext {
     name: String,
+    #[serde(default)]
+    context: Option<RawContextBody>,
+}
+
+#[derive(Deserialize)]
+struct RawContextBody {
+    #[serde(default)]
+    cluster: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RawCluster {
+    name: String,
+    #[serde(default)]
+    cluster: Option<RawClusterBody>,
+}
+
+#[derive(Deserialize)]
+struct RawClusterBody {
+    #[serde(default)]
+    server: Option<String>,
 }
 
 /// The contexts k9mux found, a cluster per source file, and the files
@@ -22,9 +45,25 @@ pub struct Loaded {
     pub contexts: Vec<String>,
     pub grouping: Grouping,
     pub paths: Vec<PathBuf>,
+    /// API server URL per context, where the kubeconfig gives one.
+    pub servers: Vec<(String, String)>,
 }
 
 impl Loaded {
+    /// Clusters the prober should watch.
+    pub fn probe_targets(&self) -> Vec<crate::probe::Target> {
+        self.servers
+            .iter()
+            .filter_map(|(ctx, url)| {
+                crate::probe::endpoint(url).map(|(host, port)| crate::probe::Target {
+                    instance: crate::fleet::display_name(ctx),
+                    host,
+                    port,
+                })
+            })
+            .collect()
+    }
+
     /// The value to set as KUBECONFIG for a child k9s.
     pub fn kubeconfig_env(&self) -> String {
         self.paths
@@ -100,6 +139,7 @@ pub fn group_name(path: &Path) -> String {
 pub fn load(paths: &[PathBuf]) -> Result<Loaded, String> {
     let mut contexts: Vec<String> = Vec::new();
     let mut clusters: Vec<(String, Vec<String>)> = Vec::new();
+    let mut servers: Vec<(String, String)> = Vec::new();
 
     for path in paths {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -113,6 +153,25 @@ pub fn load(paths: &[PathBuf]) -> Result<Loaded, String> {
             .map(|c| c.name.clone())
             .filter(|n| !contexts.contains(n))
             .collect();
+        // Where each new context's API server lives, via its cluster entry.
+        for c in &one.contexts {
+            if !fresh.contains(&c.name) {
+                continue;
+            }
+            let Some(cluster) = c.context.as_ref().and_then(|b| b.cluster.as_ref()) else {
+                continue;
+            };
+            if let Some(url) = one
+                .clusters
+                .iter()
+                .find(|k| &k.name == cluster)
+                .and_then(|k| k.cluster.as_ref())
+                .and_then(|b| b.server.clone())
+            {
+                servers.push((c.name.clone(), url));
+            }
+        }
+
         if !fresh.is_empty() {
             contexts.extend(fresh.clone());
             clusters.push((group_name(path), fresh));
@@ -133,6 +192,7 @@ pub fn load(paths: &[PathBuf]) -> Result<Loaded, String> {
         contexts,
         grouping: Grouping { clusters },
         paths: paths.to_vec(),
+        servers,
     })
 }
 
@@ -149,8 +209,14 @@ mod tests {
     }
 
     fn kubeconfig_yaml(contexts: &[&str]) -> String {
-        let mut s =
-            String::from("apiVersion: v1\nkind: Config\nclusters: []\nusers: []\ncontexts:\n");
+        let mut s = String::from("apiVersion: v1\nkind: Config\nusers: []\nclusters:\n");
+        for (i, c) in contexts.iter().enumerate() {
+            s.push_str(&format!(
+                "- name: {c}-cluster\n  cluster:\n    server: https://{c}.example.com:{}\n",
+                6443 + i
+            ));
+        }
+        s.push_str("contexts:\n");
         for c in contexts {
             s.push_str(&format!(
                 "- name: {c}\n  context:\n    cluster: {c}-cluster\n    user: {c}-user\n"
@@ -335,6 +401,52 @@ mod tests {
             loaded.kubeconfig_env(),
             format!("{}:{}", a.display(), b.display())
         );
+    }
+
+    #[test]
+    fn the_api_server_of_each_context_is_picked_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = write(dir.path(), "config-prod", &["one", "two"]);
+        let loaded = load(&[f]).unwrap();
+        assert_eq!(
+            loaded.servers,
+            vec![
+                (
+                    "one".to_string(),
+                    "https://one.example.com:6443".to_string()
+                ),
+                (
+                    "two".to_string(),
+                    "https://two.example.com:6444".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn probe_targets_use_the_display_name_and_the_parsed_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = write(dir.path(), "config-prod", &["one"]);
+        let targets = load(&[f]).unwrap().probe_targets();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].instance, "one");
+        assert_eq!(targets[0].host, "one.example.com");
+        assert_eq!(targets[0].port, 6443);
+    }
+
+    #[test]
+    fn a_context_without_a_server_is_simply_not_probed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config-bare");
+        std::fs::write(
+            &path,
+            "apiVersion: v1\nkind: Config\ncontexts:\n- name: bare\n",
+        )
+        .unwrap();
+        let loaded = load(&[path]).unwrap();
+        assert_eq!(loaded.contexts, vec!["bare"]);
+        assert!(loaded.servers.is_empty());
+        assert!(loaded.probe_targets().is_empty());
     }
 
     #[test]

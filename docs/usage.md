@@ -45,6 +45,7 @@ All of these are typed after the prefix, `option-space` by default, written
 | `⌥space` `%` | split the window into side-by-side panes |
 | `⌥space` `"` | split the window into stacked panes |
 | `⌥space` `x` | close the focused pane |
+| `⌥space` `z` | zoom the focused pane to fill the window |
 | `⌥space` `r` | restart k9s in the focused pane |
 
 Moving between panes needs no prefix:
@@ -81,15 +82,47 @@ Renaming opens an inline prompt in the sidebar, pre-filled with the current
 name. `Enter` commits, `Esc` cancels, and an empty name keeps the old one.
 While you are typing a name, keys go to the prompt rather than to k9s.
 
+## Zoom
+
+`⌥space z` blows the focused pane up to fill the whole window, hiding the
+others; press it again to put the layout back exactly as it was. A zoomed pane
+is marked `Z` in its title. Splitting while zoomed unzooms first, as in tmux.
+
+Zoom belongs to the window, so you can leave one window zoomed, work in
+another, and come back to it still zoomed.
+
 ## Moving between clusters
 
 Each pane is pointed at one cluster. To change which:
 
 | | |
 |---|---|
+| `⌥space` `w` | **pick a cluster by name** |
 | `⌥space` `>` | next cluster in the focused pane |
 | `⌥space` `<` | previous cluster |
 | click a pane in the sidebar | focus it |
+
+`⌥space w` opens a fuzzy picker over the whole fleet. Type any letters of the
+name — `eks` finds `apps-eks`, `data-eks` and anything else those letters run
+through — then `↑↓` to move and `Enter` to point the focused pane at it. Each
+entry carries its health dot, so you can see which clusters are answering
+before you open one.
+
+This is the one thing a plain multiplexer cannot do for you: tmux has no idea
+what a cluster is, so it cannot offer you a list of them.
+
+## A window per cluster group
+
+`⌥space g` opens one window per cluster group, named after the group, with a
+pane for each cluster in it. With a config like
+
+```sh
+cluster prod-us use1-a use1-b
+cluster prod-eu euc1-a euc1-b
+```
+
+that is two windows and four k9s processes from one keystroke. Panes stop
+being added when the window runs out of room rather than being squeezed.
 
 Switching a pane's cluster restarts k9s in that pane against the new context.
 A new pane or window picks the first cluster that is not already open
@@ -108,9 +141,13 @@ k9mux  2 windows
   ● data-eks
 ```
 
-`*` marks the current window. The dot shows what k9mux knows about each
-cluster: green once k9s started against it, red if the process could not be
-started at all, grey before it has been tried.
+`*` marks the current window. The dot is a live health signal: k9mux opens a
+TCP connection to each cluster's API server every 15 seconds, so green means
+the cluster is actually answering and red means it is not. Grey means it has
+not been probed yet, or the kubeconfig gave no server address for it.
+
+This is reachability, not authentication — a cluster you have no credentials
+for still shows green if its API server is up.
 
 Click a window to switch to it, or a pane to focus it. The key hints along the
 bottom are generated from your own bindings, so they always match your config.

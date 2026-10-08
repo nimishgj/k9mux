@@ -18,6 +18,9 @@ pub enum Action {
     Restart,
     ToggleHelp,
     ToggleSidebar,
+    ToggleZoom,
+    ClusterPicker,
+    SpreadClusters,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

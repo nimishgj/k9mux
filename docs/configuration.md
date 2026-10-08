@@ -101,6 +101,7 @@ sends `alt`+`h` or `˙`.
 | `close-pane` | close the focused pane |
 | `focus-left` `focus-right` `focus-up` `focus-down` | move focus geometrically |
 | `focus-next` | cycle to the next pane |
+| `zoom` | blow the focused pane up to fill the window |
 | `restart` | restart k9s in the focused pane |
 
 **Clusters**
@@ -108,6 +109,8 @@ sends `alt`+`h` or `˙`.
 | command | |
 |---|---|
 | `next-cluster` / `prev-cluster` | repoint the focused pane at another cluster |
+| `choose-cluster` | fuzzy picker over the whole fleet |
+| `spread-clusters` | open a window per cluster group |
 
 **Other**
 

@@ -187,6 +187,9 @@ pub fn parse_command(text: &str) -> Option<Action> {
         "restart" => Action::Restart,
         "help" => Action::ToggleHelp,
         "toggle-sidebar" => Action::ToggleSidebar,
+        "zoom" => Action::ToggleZoom,
+        "choose-cluster" => Action::ClusterPicker,
+        "spread-clusters" => Action::SpreadClusters,
         "quit" => Action::Quit,
         other => {
             // select-window-0 .. select-window-9
@@ -217,6 +220,9 @@ pub fn command_name(action: &Action) -> &'static str {
         Action::Restart => "restart",
         Action::ToggleHelp => "help",
         Action::ToggleSidebar => "toggle-sidebar",
+        Action::ToggleZoom => "zoom",
+        Action::ClusterPicker => "choose-cluster",
+        Action::SpreadClusters => "spread-clusters",
         Action::Quit => "quit",
     }
 }
@@ -240,6 +246,9 @@ bind x   close-pane
 bind Tab focus-next
 bind '<' prev-cluster
 bind '>' next-cluster
+bind z   zoom
+bind w   choose-cluster
+bind g   spread-clusters
 bind r   restart
 bind e   toggle-sidebar
 bind ?   help
@@ -273,6 +282,9 @@ impl Default for Keymap {
             ("Tab", "focus-next"),
             ("<", "prev-cluster"),
             (">", "next-cluster"),
+            ("z", "zoom"),
+            ("w", "choose-cluster"),
+            ("g", "spread-clusters"),
             ("r", "restart"),
             ("e", "toggle-sidebar"),
             ("?", "help"),
@@ -450,6 +462,9 @@ mod tests {
             Action::Restart,
             Action::ToggleHelp,
             Action::ToggleSidebar,
+            Action::ToggleZoom,
+            Action::ClusterPicker,
+            Action::SpreadClusters,
         ] {
             let name = command_name(&a);
             assert_eq!(parse_command(name), Some(a.clone()), "{name}");
@@ -477,6 +492,12 @@ mod tests {
         );
         assert_eq!(km.resolve(k('x'), true), Outcome::Do(Action::ClosePane));
         assert_eq!(km.resolve(k('e'), true), Outcome::Do(Action::ToggleSidebar));
+        assert_eq!(km.resolve(k('z'), true), Outcome::Do(Action::ToggleZoom));
+        assert_eq!(km.resolve(k('w'), true), Outcome::Do(Action::ClusterPicker));
+        assert_eq!(
+            km.resolve(k('g'), true),
+            Outcome::Do(Action::SpreadClusters)
+        );
         assert_eq!(km.resolve(k('c'), true), Outcome::Do(Action::NewWindow));
         assert_eq!(km.resolve(k(','), true), Outcome::Do(Action::RenameWindow));
         assert_eq!(km.resolve(k('n'), true), Outcome::Do(Action::NextWindow));

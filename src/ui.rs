@@ -30,6 +30,9 @@ const SUMMARY: &[(&str, &str)] = &[
     ("focus-right", "focus right"),
     ("next-cluster", "next cluster"),
     ("prev-cluster", "prev cluster"),
+    ("zoom", "zoom pane"),
+    ("choose-cluster", "choose cluster"),
+    ("spread-clusters", "window per cluster"),
     ("close-pane", "close pane"),
     ("restart", "restart k9s"),
     ("toggle-sidebar", "hide this sidebar"),
@@ -55,8 +58,14 @@ fn hints(app: &App) -> Vec<(String, &'static str)> {
 }
 
 /// Where each pane of the current window is drawn.
-pub fn pane_areas(app: &App, area: Rect) -> Vec<Rect> {
-    app.pane_rects(pane_body(app, area))
+/// The panes on screen and where they go: every pane, or just the zoomed one.
+pub fn pane_areas(app: &App, area: Rect) -> Vec<(usize, Rect)> {
+    let body = pane_body(app, area);
+    let w = app.window();
+    w.rects(body)
+        .into_iter()
+        .filter_map(|(id, r)| w.index_of(id).map(|i| (i, r)))
+        .collect()
 }
 
 /// The region the panes share, i.e. everything the sidebar is not using.
@@ -71,13 +80,16 @@ pub fn pane_body(app: &App, area: Rect) -> Rect {
 }
 
 /// Rows and columns available to each child, i.e. inside the borders.
-pub fn pane_inner_sizes(app: &App, area: Rect) -> Vec<(u16, u16)> {
+pub fn pane_inner_sizes(app: &App, area: Rect) -> Vec<(usize, (u16, u16))> {
     pane_areas(app, area)
         .into_iter()
-        .map(|r| {
+        .map(|(i, r)| {
             (
-                r.height.saturating_sub(2).max(1),
-                r.width.saturating_sub(2).max(1),
+                i,
+                (
+                    r.height.saturating_sub(2).max(1),
+                    r.width.saturating_sub(2).max(1),
+                ),
             )
         })
         .collect()
@@ -124,7 +136,8 @@ pub fn pane_hit(app: &App, area: Rect, x: u16, y: u16) -> Option<usize> {
     }
     pane_areas(app, area)
         .into_iter()
-        .position(|r| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
+        .find(|(_, r)| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
+        .map(|(i, _)| i)
 }
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -134,12 +147,75 @@ pub fn draw(f: &mut Frame, app: &App) {
             Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(0)]).areas(area);
         draw_sidebar(f, app, rail);
     }
-    for (i, r) in pane_areas(app, area).into_iter().enumerate() {
+    for (i, r) in pane_areas(app, area) {
         draw_pane(f, app, i, r);
+    }
+    if let Mode::Picker { query, selected } = &app.mode {
+        draw_picker(f, app, area, query, *selected);
     }
     if app.help {
         draw_help(f, app, area);
     }
+}
+
+/// A fuzzy list of every cluster in the fleet, for the focused pane.
+fn draw_picker(f: &mut Frame, app: &App, area: Rect, query: &str, selected: usize) {
+    let hits = app.picker_matches();
+    let rows = hits.len().clamp(1, 12) as u16;
+    let w = 56.min(area.width);
+    let h = (rows + 4).min(area.height);
+    let popup = Rect::new(
+        area.x + (area.width.saturating_sub(w)) / 2,
+        area.y + (area.height.saturating_sub(h)) / 3,
+        w,
+        h,
+    );
+    f.render_widget(Clear, popup);
+
+    let mut lines = vec![Line::from(vec![
+        Span::styled("> ", Style::new().fg(ORANGE)),
+        Span::styled(query.to_string(), Style::new().fg(Color::White)),
+        Span::styled("▏", Style::new().fg(ORANGE)),
+    ])];
+    if hits.is_empty() {
+        lines.push(Line::styled("  no cluster matches", Style::new().fg(DIM)));
+    }
+    // Keep the selection on screen when the list is long.
+    let first = selected.saturating_sub(rows as usize - 1);
+    for (i, name) in hits.iter().enumerate().skip(first).take(rows as usize) {
+        let health = app
+            .fleet
+            .find(name)
+            .map(|x| x.health)
+            .unwrap_or(Health::Unknown);
+        let style = if i == selected {
+            Style::new().bg(SELECT).fg(Color::White)
+        } else {
+            Style::new()
+        };
+        lines.push(
+            Line::from(vec![
+                Span::raw(" "),
+                health_dot(health),
+                Span::raw(" "),
+                Span::raw(name.clone()),
+            ])
+            .style(style),
+        );
+    }
+
+    f.render_widget(
+        Paragraph::new(lines).block(
+            Block::bordered()
+                .border_style(Style::new().fg(Color::Cyan))
+                .title("choose a cluster")
+                .title_bottom(Line::styled(
+                    " ↑↓ move · ⏎ attach · esc cancel ",
+                    Style::new().fg(DIM),
+                )),
+        ),
+        popup,
+    );
 }
 
 fn health_dot(h: Health) -> Span<'static> {
@@ -267,6 +343,14 @@ fn draw_pane(f: &mut Frame, app: &App, idx: usize, area: Rect) {
             Span::styled(
                 format!(" [{}]", idx + 1),
                 Style::new().fg(if focused { Color::Cyan } else { DIM }),
+            ),
+            Span::styled(
+                if app.window().zoomed.is_some() {
+                    " Z"
+                } else {
+                    ""
+                },
+                Style::new().fg(Color::Yellow),
             ),
         ]));
     let inner = block.inner(area);
@@ -624,7 +708,7 @@ mod tests {
         let panes = pane_areas(&a, area);
         let sizes = pane_inner_sizes(&a, area);
         assert_eq!(sizes.len(), 2);
-        for (r, (rows, cols)) in panes.iter().zip(&sizes) {
+        for ((_, r), (_, (rows, cols))) in panes.iter().zip(&sizes) {
             assert_eq!(*rows, r.height - 2);
             assert_eq!(*cols, r.width - 2);
         }
@@ -637,8 +721,8 @@ mod tests {
         let area = Rect::new(0, 0, 140, 40);
         let sizes = pane_inner_sizes(&a, area);
         a.resize_panes(&sizes);
-        for (i, expected) in sizes.iter().enumerate() {
-            assert_eq!(a.panes()[i].session.as_ref().unwrap().size(), *expected);
+        for (i, expected) in &sizes {
+            assert_eq!(a.panes()[*i].session.as_ref().unwrap().size(), *expected);
         }
     }
 
@@ -674,14 +758,14 @@ mod tests {
     fn collapsing_the_sidebar_gives_the_space_to_the_panes() {
         let mut a = app();
         let area = Rect::new(0, 0, 140, 40);
-        let before = pane_areas(&a, area)[0];
+        let before = pane_areas(&a, area)[0].1;
         assert_eq!(before.x, SIDEBAR_WIDTH);
 
         a.apply(Action::ToggleSidebar);
-        let after = pane_areas(&a, area)[0];
+        let after = pane_areas(&a, area)[0].1;
         assert_eq!(after.x, 0, "panes should start at the left edge");
         assert_eq!(after.width, before.width + SIDEBAR_WIDTH);
-        assert_eq!(pane_inner_sizes(&a, area)[0].1, after.width - 2);
+        assert_eq!(pane_inner_sizes(&a, area)[0].1.1, after.width - 2);
     }
 
     #[test]

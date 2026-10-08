@@ -38,6 +38,9 @@ prefix, `option-space` by default. Moving between panes needs no prefix.
 | `⌥space` `%` `"` | split the focused pane, side-by-side / stacked |
 | `⌥space` `x` | close the pane |
 | `⌥space` `<` `>` | previous / next cluster in the focused pane |
+| `⌥space` `z` | zoom the focused pane |
+| `⌥space` `w` | pick a cluster by name |
+| `⌥space` `g` | a window per cluster group |
 | `⌥space` `e` | collapse the sidebar |
 | `⌥space` `r` | restart k9s in the pane |
 | `⌥space` `?` | help |
@@ -81,6 +84,8 @@ copyable starting point.
 | `src/keys.rs` | actions, and key → pty bytes |
 | `src/layout.rs` | pane geometry |
 | `src/ui.rs` | sidebar of windows and panes, embedded terminals |
+| `src/picker.rs` | fuzzy matching for the cluster picker |
+| `src/probe.rs` | reachability probes for the API servers |
 | `src/fleet.rs` | clusters, instances, display names |
 | `src/kubeconfig.rs` | which files to read, merging, cluster-per-file |
 | `src/config.rs` | the tmux-style config parser |
@@ -101,5 +106,6 @@ and macOS, since the pty layer is the part most likely to differ.
 ## Not done yet
 
 - No session persistence: closing k9mux kills its k9s processes.
+- Health probes are a TCP connect to the API server — reachability, not auth.
 - Panes can't be resized by hand; splits are always even.
 - No scrollback beyond what k9s itself draws.

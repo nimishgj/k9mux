@@ -298,8 +298,8 @@ fn children_are_resized_to_match_their_panes() {
     let area = Rect::new(0, 0, 160, 44);
     let sizes = ui::pane_inner_sizes(&app, area);
     app.resize_panes(&sizes);
-    for (i, expected) in sizes.iter().enumerate() {
-        assert_eq!(app.panes()[i].session.as_ref().unwrap().size(), *expected);
+    for (i, expected) in &sizes {
+        assert_eq!(app.panes()[*i].session.as_ref().unwrap().size(), *expected);
     }
 }
 
