@@ -1,5 +1,6 @@
 use crate::app::{App, Mode, Pane};
 use crate::fleet::Health;
+use crate::layout::{Border, Path};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -140,6 +141,33 @@ pub fn pane_hit(app: &App, area: Rect, x: u16, y: u16) -> Option<usize> {
         .into_iter()
         .find(|(_, r)| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
         .map(|(i, _)| i)
+}
+
+/// The borders the mouse can grab, in the frame's own coordinates. A zoomed
+/// pane fills the window by itself, so it has none.
+pub fn borders(app: &App, area: Rect) -> Vec<Border> {
+    let w = app.window();
+    if w.zoomed.is_some_and(|id| w.index_of(id).is_some()) {
+        return Vec::new();
+    }
+    w.layout.borders(pane_body(app, area))
+}
+
+/// The border under the pointer, if any. Checked before a focus click, the
+/// way tmux treats a press on a pane border as a drag.
+pub fn border_hit(app: &App, area: Rect, x: u16, y: u16) -> Option<Path> {
+    borders(app, area)
+        .into_iter()
+        .find(|b| b.hits(x, y))
+        .map(|b| b.path)
+}
+
+/// The ratio that drags `path`'s border to the pointer.
+pub fn border_ratio(app: &App, area: Rect, path: &Path, x: u16, y: u16) -> Option<u16> {
+    borders(app, area)
+        .into_iter()
+        .find(|b| &b.path == path)
+        .map(|b| b.ratio_at(b.coord(x, y)))
 }
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -833,6 +861,132 @@ mod tests {
             (4, 2),
         ] {
             let _ = screen_of(&a, w, h);
+        }
+    }
+
+    // ---- mouse drag ----
+
+    /// Two panes side by side in a 140x40 frame: the body starts after the
+    /// sidebar, so the border between them lands here.
+    const BORDER_X: u16 = SIDEBAR_WIDTH + 55;
+
+    fn split_app() -> (App, Rect) {
+        let mut a = app();
+        a.apply(Action::Split(Split::Vertical));
+        (a, Rect::new(0, 0, 140, 40))
+    }
+
+    #[test]
+    fn the_border_between_two_panes_is_where_it_is_drawn() {
+        let (a, area) = split_app();
+        let b = borders(&a, area);
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0].pos, BORDER_X);
+        assert_eq!(pane_areas(&a, area)[1].1.x, BORDER_X, "the right pane");
+    }
+
+    #[test]
+    fn the_border_can_be_grabbed_from_either_pane() {
+        let (a, area) = split_app();
+        let path = borders(&a, area)[0].path.clone();
+        assert_eq!(border_hit(&a, area, BORDER_X, 10), Some(path.clone()));
+        assert_eq!(border_hit(&a, area, BORDER_X - 1, 10), Some(path));
+    }
+
+    #[test]
+    fn a_press_in_a_pane_or_the_sidebar_is_not_a_grab() {
+        let (a, area) = split_app();
+        assert_eq!(border_hit(&a, area, BORDER_X + 10, 10), None);
+        assert_eq!(border_hit(&a, area, BORDER_X - 10, 10), None);
+        assert_eq!(border_hit(&a, area, 4, 10), None, "the sidebar");
+    }
+
+    #[test]
+    fn a_single_pane_has_no_border_to_grab() {
+        let a = app();
+        let area = Rect::new(0, 0, 140, 40);
+        assert!(borders(&a, area).is_empty());
+        assert_eq!(border_hit(&a, area, 80, 20), None);
+    }
+
+    #[test]
+    fn a_zoomed_pane_has_no_border_to_grab() {
+        let (mut a, area) = split_app();
+        a.apply(Action::ToggleZoom);
+        assert!(borders(&a, area).is_empty());
+        assert_eq!(border_hit(&a, area, BORDER_X, 10), None);
+    }
+
+    #[test]
+    fn dragging_the_border_resizes_both_panes() {
+        let (mut a, area) = split_app();
+        let path = border_hit(&a, area, BORDER_X, 10).expect("a border to grab");
+
+        let r = border_ratio(&a, area, &path, SIDEBAR_WIDTH + 20, 10).unwrap();
+        assert!(a.drag_border(&path, r));
+
+        let panes = pane_areas(&a, area);
+        assert_eq!(panes[0].1.width, 20, "the pane the pointer passed over");
+        assert_eq!(panes[1].1.width, 90);
+        assert_eq!(borders(&a, area)[0].pos, SIDEBAR_WIDTH + 20);
+    }
+
+    #[test]
+    fn the_border_follows_the_pointer_across_the_body() {
+        let (mut a, area) = split_app();
+        let path = border_hit(&a, area, BORDER_X, 10).unwrap();
+        for x in (SIDEBAR_WIDTH + 12)..(area.width - 12) {
+            let r = border_ratio(&a, area, &path, x, 10).unwrap();
+            a.drag_border(&path, r);
+            let got = borders(&a, area)[0].pos as i32;
+            assert!((got - x as i32).abs() <= 1, "asked {x}, landed {got}");
+        }
+    }
+
+    #[test]
+    fn a_stacked_pair_is_dragged_by_the_row_the_pointer_is_on() {
+        let mut a = app();
+        a.apply(Action::Split(Split::Horizontal));
+        let area = Rect::new(0, 0, 140, 40);
+        let path = border_hit(&a, area, 80, borders(&a, area)[0].pos).unwrap();
+        let r = border_ratio(&a, area, &path, 80, 30).unwrap();
+        a.drag_border(&path, r);
+        assert_eq!(pane_areas(&a, area)[0].1.height, 30);
+    }
+
+    #[test]
+    fn the_inner_border_is_grabbed_where_the_panes_actually_meet() {
+        // 0 on the left, 1 above 2 on the right.
+        let (mut a, area) = split_app();
+        a.apply(Action::Split(Split::Horizontal));
+        let b = borders(&a, area);
+        assert_eq!(b.len(), 2);
+        let inner = b.iter().find(|b| b.dir == Split::Horizontal).unwrap();
+
+        assert_eq!(
+            border_hit(&a, area, BORDER_X + 10, inner.pos),
+            Some(inner.path.clone()),
+            "on the line, over the right-hand column"
+        );
+        assert_eq!(
+            border_hit(&a, area, BORDER_X - 10, inner.pos),
+            None,
+            "the left pane has no border there"
+        );
+    }
+
+    #[test]
+    fn a_drag_resizes_the_children_too() {
+        let (mut a, area) = split_app();
+        let path = border_hit(&a, area, BORDER_X, 10).unwrap();
+        let r = border_ratio(&a, area, &path, SIDEBAR_WIDTH + 30, 10).unwrap();
+        a.drag_border(&path, r);
+
+        let sizes = pane_inner_sizes(&a, area);
+        a.resize_panes(&sizes);
+        assert_eq!(sizes[0].1.1, 28, "30 wide less its two borders");
+        for (i, expected) in &sizes {
+            assert_eq!(a.panes()[*i].session.as_ref().unwrap().size(), *expected);
         }
     }
 }

@@ -5,6 +5,7 @@ pub mod keymap;
 pub mod keys;
 pub mod kubeconfig;
 pub mod layout;
+pub mod mouse;
 pub mod picker;
 pub mod probe;
 pub mod session;

@@ -1,7 +1,7 @@
 use crate::fleet::{Fleet, Health};
 use crate::keymap::Keymap;
 use crate::keys::Action;
-use crate::layout::{Dir, Node, PaneId, Split};
+use crate::layout::{Dir, Node, PaneId, Path, Split};
 use crate::session::{Launch, Session};
 
 /// A pane narrower or shorter than this is not worth creating, so a split
@@ -112,6 +112,8 @@ pub struct App {
     /// False when the sidebar is collapsed to give k9s the whole width.
     pub sidebar: bool,
     pub mode: Mode,
+    /// The border the mouse has hold of, while a drag is in progress.
+    pub drag: Option<Path>,
     pub should_quit: bool,
     spawn: Spawner,
     /// Size last used for a pane, so new panes start out sensible.
@@ -142,6 +144,7 @@ impl App {
             help: false,
             sidebar: true,
             mode: Mode::Normal,
+            drag: None,
             should_quit: false,
             spawn,
             pane_size: (24, 80),
@@ -253,6 +256,17 @@ impl App {
             }
         }
         changed
+    }
+
+    /// Moves a border the mouse has hold of. The path was worked out from the
+    /// layout the last frame was drawn from, so one that has since gone stale
+    /// is simply ignored.
+    pub fn drag_border(&mut self, path: &Path, ratio: u16) -> bool {
+        // A zoomed pane already owns the window; there is no border on screen.
+        if self.window().zoomed.is_some() {
+            return false;
+        }
+        self.window_mut().layout.set_ratio(path, ratio)
     }
 
     /// Remembers the region the panes are drawn in.
@@ -1432,5 +1446,56 @@ mod tests {
         assert!(!a.help);
         a.apply(Action::Quit);
         assert!(a.should_quit);
+    }
+
+    // ---- mouse drag ----
+
+    #[test]
+    fn a_drag_moves_a_border_of_the_current_window() {
+        let area = Rect::new(0, 0, 80, 24);
+        let mut a = app();
+        a.apply(Action::Split(Split::Vertical));
+        let b = a.window().layout.borders(area)[0].clone();
+
+        assert!(a.drag_border(&b.path, b.ratio_at(24)));
+        assert_eq!(a.pane_rects(area)[0].width, 24);
+        assert_eq!(a.pane_rects(area)[1].width, 56);
+    }
+
+    #[test]
+    fn a_drag_leaves_the_other_windows_alone() {
+        let area = Rect::new(0, 0, 80, 24);
+        let mut a = app();
+        a.apply(Action::Split(Split::Vertical));
+        a.apply(Action::NewWindow);
+        a.apply(Action::Split(Split::Vertical));
+        let b = a.window().layout.borders(area)[0].clone();
+        a.drag_border(&b.path, b.ratio_at(20));
+
+        assert_eq!(a.pane_rects(area)[0].width, 20);
+        a.apply(Action::PrevWindow);
+        assert_eq!(a.pane_rects(area)[0].width, 40, "still an even split");
+    }
+
+    #[test]
+    fn a_drag_on_a_layout_that_has_moved_on_is_ignored() {
+        let area = Rect::new(0, 0, 80, 24);
+        let mut a = app();
+        a.apply(Action::Split(Split::Vertical));
+        let b = a.window().layout.borders(area)[0].clone();
+        a.apply(Action::ClosePane); // the split the drag refers to is gone
+        assert!(!a.drag_border(&b.path, 80));
+        assert_eq!(a.pane_rects(area)[0], area);
+    }
+
+    #[test]
+    fn a_zoomed_pane_cannot_be_dragged() {
+        let area = Rect::new(0, 0, 80, 24);
+        let mut a = app();
+        a.apply(Action::Split(Split::Vertical));
+        let b = a.window().layout.borders(area)[0].clone();
+        a.apply(Action::ToggleZoom);
+        assert!(!a.drag_border(&b.path, b.ratio_at(20)));
+        assert_eq!(a.pane_rects(area)[0], area, "the zoom still owns it all");
     }
 }

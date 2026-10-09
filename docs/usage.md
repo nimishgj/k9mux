@@ -95,6 +95,20 @@ top-right pane vertically adjusts the split it shares with the pane below,
 leaving the rest of the window alone. A border stops before it would crush a
 pane out of existence.
 
+You can also **drag a border with the mouse**: press on the line between two
+panes and move the pointer, and the border follows it until you let go. No
+prefix, no keystroke. A press on a border starts a drag rather than focusing
+either of the panes it divides; a press anywhere else inside a pane focuses
+that pane as before.
+
+A border is a percentage of the space its split divides, so the layout keeps
+its proportions when the terminal is resized. On a wide window one percent is
+worth more than one column, which is why a dragged border can land a single
+cell either side of the pointer.
+
+A zoomed pane fills the window on its own and has no border, so there is
+nothing to drag until you unzoom.
+
 ## Zoom
 
 `⌥space z` blows the focused pane up to fill the whole window, hiding the
@@ -162,8 +176,10 @@ not been probed yet, or the kubeconfig gave no server address for it.
 This is reachability, not authentication — a cluster you have no credentials
 for still shows green if its API server is up.
 
-Click a window to switch to it, or a pane to focus it. The key hints along the
-bottom are generated from your own bindings, so they always match your config.
+Click a window to switch to it, or a pane to focus it. Click a pane on screen
+to focus it, and drag the border between two panes to resize them. The key
+hints along the bottom are generated from your own bindings, so they always
+match your config.
 
 `⌥space` `e` collapses the sidebar and gives the full width to k9s; press it
 again to bring it back.

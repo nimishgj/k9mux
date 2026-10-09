@@ -38,7 +38,7 @@ prefix, `option-space` by default. Moving between panes needs no prefix.
 | `⌥space` `%` `"` | split the focused pane, side-by-side / stacked |
 | `⌥space` `x` | close the pane |
 | `⌥space` `<` `>` | previous / next cluster in the focused pane |
-| `⌥space` `H` `J` `K` `L` | resize the pane (move its border) |
+| `⌥space` `H` `J` `K` `L` | resize the pane (or drag its border with the mouse) |
 | `⌥space` `z` | zoom the focused pane |
 | `⌥space` `w` | pick a cluster by name |
 | `⌥space` `g` | a window per cluster group |

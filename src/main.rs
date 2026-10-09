@@ -1,9 +1,7 @@
 use std::io::stdout;
 use std::time::Duration;
 
-use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, MouseButton, MouseEventKind,
-};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -202,20 +200,7 @@ fn event_loop<B: ratatui::backend::Backend>(
                         Outcome::Ignore => app.armed = false,
                     }
                 }
-                Event::Mouse(m) if m.kind == MouseEventKind::Down(MouseButton::Left) => {
-                    match ui::sidebar_hit(app, m.column, m.row) {
-                        Some(ui::Row::Window(w)) => app.select_window(w),
-                        Some(ui::Row::Pane { window, pane }) => {
-                            app.select_window(window);
-                            app.set_focus(pane);
-                        }
-                        None => {
-                            if let Some(idx) = ui::pane_hit(app, area, m.column, m.row) {
-                                app.set_focus(idx);
-                            }
-                        }
-                    }
-                }
+                Event::Mouse(m) => k9mux::mouse::handle(app, area, m),
                 _ => {}
             }
         }
