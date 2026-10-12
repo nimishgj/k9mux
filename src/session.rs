@@ -182,8 +182,10 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
-    /// `TERM` is set explicitly because CI runners often have none, and some
-    /// of these stubs ask the terminal about itself.
+    /// `TERM` is set explicitly because CI runners often have none, the way
+    /// k9s is given one in production. The stubs that ask how big the
+    /// terminal is use `stty`, which needs no terminfo database and so runs
+    /// on a bare image too - busybox, for one, has no `tput`.
     fn sh(script: &str) -> Launch {
         Launch::new("sh")
             .arg("-c")
@@ -221,7 +223,7 @@ mod tests {
 
     #[test]
     fn the_child_is_told_the_terminal_size() {
-        let s = Session::spawn(&sh("tput lines; tput cols"), 17, 61).unwrap();
+        let s = Session::spawn(&sh("stty size"), 17, 61).unwrap();
         let text = wait_for(&s, |t| t.contains("17") && t.contains("61"));
         assert!(text.contains("17"), "{text}");
         assert!(text.contains("61"), "{text}");
@@ -254,7 +256,7 @@ mod tests {
 
     #[test]
     fn a_resize_makes_the_child_see_the_new_size() {
-        let mut s = Session::spawn(&sh("trap 'tput cols' WINCH; sleep 5 & wait"), 10, 40).unwrap();
+        let mut s = Session::spawn(&sh("trap 'stty size' WINCH; sleep 5 & wait"), 10, 40).unwrap();
         std::thread::sleep(Duration::from_millis(300));
         s.resize(10, 123);
         let text = wait_for(&s, |t| t.contains("123"));

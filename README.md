@@ -17,6 +17,36 @@ KUBECONFIG=~/.kube/a:~/.kube/b k9mux          # several, merged
 
 Requires `k9s` on your PATH.
 
+## Install
+
+Every [release](https://github.com/nimishgj/k9mux/releases/latest) carries
+prebuilt binaries for macOS and Linux, on both Apple silicon / arm64 and x86.
+The Linux builds are static, so they run on any distribution.
+
+```sh
+V=0.1.0
+case "$(uname -sm)" in
+  "Darwin arm64")  T=aarch64-apple-darwin ;;
+  "Darwin x86_64") T=x86_64-apple-darwin ;;
+  "Linux aarch64") T=aarch64-unknown-linux-musl ;;
+  "Linux x86_64")  T=x86_64-unknown-linux-musl ;;
+esac
+curl -sSfL "https://github.com/nimishgj/k9mux/releases/download/v$V/k9mux-$V-$T.tar.gz" | tar xz
+sudo install -m755 "k9mux-$V-$T/k9mux" /usr/local/bin/k9mux
+```
+
+Each tarball has a `.sha256` next to it. On macOS, a tarball downloaded by a
+browser is quarantined: `xattr -dr com.apple.quarantine k9mux` before running.
+
+From source, with a Rust toolchain:
+
+```sh
+cargo install --git https://github.com/nimishgj/k9mux    # or: make install
+```
+
+Building and releasing it yourself is in
+[docs/releasing.md](docs/releasing.md).
+
 It opens one window called `k9mux` on your first cluster. `⌥space %` splits it
 so a second cluster sits alongside, `⌥space c` opens another window, `⌥space ,`
 names it after whatever you are actually doing.
