@@ -124,7 +124,7 @@ copyable starting point.
 ```sh
 make          # list targets
 make ci       # fmt-check, lint, test — what CI runs
-make test     # 183 tests
+make test     # 286 tests
 make run      # run against your kubeconfig
 make install  # into ~/.cargo/bin
 ```
@@ -139,3 +139,9 @@ and macOS, since the pty layer is the part most likely to differ.
 - No session persistence: closing k9mux kills its k9s processes.
 - Health probes are a TCP connect to the API server — reachability, not auth.
 - No scrollback beyond what k9s itself draws.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
+
+Copyright 2026 The k9mux Authors.
