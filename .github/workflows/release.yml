@@ -42,6 +42,11 @@ jobs:
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal
 
+      # Needed before anything builds or tests for a target that is not the
+      # runner's own.
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
