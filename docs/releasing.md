@@ -87,6 +87,54 @@ Both the Makefile and the workflow go through
 [`scripts/dist.sh`](../scripts/dist.sh), so a tarball you build on your laptop
 is put together exactly like a published one.
 
+## Homebrew
+
+`brew install nimishgj/tap/k9mux` needs a *tap*: a repository named
+`homebrew-tap` on the same account, holding the formula at
+`Formula/k9mux.rb`. Create it once:
+
+```sh
+gh repo create nimishgj/homebrew-tap --public \
+  -d "Homebrew formulae for k9mux"
+```
+
+Both this repository and the tap have to be **public**. Homebrew fetches
+release assets anonymously, so a private asset answers with a 404 no matter
+who is asking.
+
+After that, each release can update the formula on its own. Create a
+fine-grained token with `contents: write` on the tap repository and add it
+here as the secret `HOMEBREW_TAP_TOKEN`; the `tap` job then commits a fresh
+formula on every tag. Without the secret the job says so and succeeds, so a
+release never fails for want of it.
+
+By hand it is two commands:
+
+```sh
+gh release download v0.1.0 --pattern '*.sha256' -D dist
+scripts/brew-formula.sh 0.1.0 > ../homebrew-tap/Formula/k9mux.rb
+```
+
+[`scripts/brew-formula.sh`](../scripts/brew-formula.sh) reads the checksums
+out of the `.sha256` files in `dist/`, so the formula can only ever claim a
+hash that something really produced — it cannot drift from the release the
+way a hand-edited formula does. `BASE_URL` points it elsewhere, which is how
+you test a formula against local tarballs before publishing anything:
+
+```sh
+make dist
+BASE_URL="file://$PWD/dist" scripts/brew-formula.sh 0.1.0
+```
+
+The formula declares `depends_on "k9s"`, from homebrew-core, since a pane
+with no k9s to run is of no use. On a machine where k9s came from somewhere
+else — another tap, asdf, a plain download — Homebrew will install its own
+copy alongside.
+
+Submitting k9mux to homebrew-core instead of a tap is not worth trying yet:
+core wants a project with real usage behind it, and refuses anything that
+cannot show it.
+
 ## Notes
 
 - **The binaries are not signed or notarised.** A tarball downloaded by a
