@@ -64,7 +64,7 @@ impl Config {
         let mut cfg = Config::default();
         for (n, line) in text.lines().enumerate() {
             let at = |msg: String| format!("line {}: {msg}", n + 1);
-            let words = tokenize(line).map_err(&at)?;
+            let words = tokenize(line).map_err(at)?;
             let Some(directive) = words.first() else {
                 continue;
             };
