@@ -89,9 +89,10 @@ is put together exactly like a published one.
 
 ## Homebrew
 
-`brew install nimishgj/tap/k9mux` needs a *tap*: a repository named
-`homebrew-tap` on the same account, holding the formula at
-`Formula/k9mux.rb`. Create it once:
+`brew install nimishgj/tap/k9mux` is served by a *tap*: the repository
+[nimishgj/homebrew-tap](https://github.com/nimishgj/homebrew-tap), holding the
+formula at `Formula/k9mux.rb`. It already exists; recreating one from scratch
+is a single command:
 
 ```sh
 gh repo create nimishgj/homebrew-tap --public \

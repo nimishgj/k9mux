@@ -19,9 +19,26 @@ Requires `k9s` on your PATH.
 
 ## Install
 
-Every [release](https://github.com/nimishgj/k9mux/releases/latest) carries
-prebuilt binaries for macOS and Linux, on both Apple silicon / arm64 and x86.
-The Linux builds are static, so they run on any distribution.
+```sh
+brew install nimishgj/tap/k9mux
+```
+
+> If you have the old `derailed/k9s` tap installed, Homebrew may refuse the
+> `k9s` dependency with *"Refusing to load formula derailed/k9s/k9s from
+> untrusted tap"* — it resolves `k9s` to that tap rather than to
+> homebrew-core. Either `brew trust derailed/k9s`, or drop it and take k9s
+> from core, which carries it now:
+>
+> ```sh
+> brew untap derailed/k9s && brew install k9s
+> ```
+>
+> A machine without that tap resolves straight to core and needs none of
+> this.
+
+Otherwise, every [release](https://github.com/nimishgj/k9mux/releases/latest)
+carries prebuilt binaries for macOS and Linux, on both Apple silicon / arm64
+and x86. The Linux builds are static, so they run on any distribution.
 
 ```sh
 V=0.1.0
