@@ -14,12 +14,14 @@ pub const DEFAULT_WINDOW_NAME: &str = "k9mux";
 pub type Spawner = Box<dyn Fn(&str) -> Launch + Send + Sync>;
 
 /// The k9s invocation for a context, with k9mux' kubeconfig handed down.
+/// `--headless` drops k9s' banner so each pane is all resource view.
 pub fn k9s_launch(kubeconfig: &str) -> Spawner {
     let kubeconfig = kubeconfig.to_string();
     Box::new(move |context: &str| {
         Launch::new("k9s")
             .arg("--context")
             .arg(context)
+            .arg("--headless")
             .env("KUBECONFIG", &kubeconfig)
             .env("TERM", "xterm-256color")
     })
@@ -1025,10 +1027,10 @@ mod tests {
     // ---- clusters ----
 
     #[test]
-    fn the_real_launcher_runs_k9s_with_the_context_and_kubeconfig() {
+    fn the_real_launcher_runs_headless_k9s_with_the_context_and_kubeconfig() {
         let launch = k9s_launch("/tmp/kc-a:/tmp/kc-b")("use1-a");
         assert_eq!(launch.program, "k9s");
-        assert_eq!(launch.args, vec!["--context", "use1-a"]);
+        assert_eq!(launch.args, vec!["--context", "use1-a", "--headless"]);
         assert!(
             launch
                 .env
